@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750" width="600" height="750">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+    <linearGradient id="niveaBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#002b66"/>
+      <stop offset="100%" stop-color="#001a40"/>
+    </linearGradient>
+    <linearGradient id="cherryRed" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#dc2626"/>
+      <stop offset="50%" stop-color="#b91c1c"/>
+      <stop offset="100%" stop-color="#991b1b"/>
+    </linearGradient>
+    <linearGradient id="stickSheen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="35%" stop-color="#f87171"/>
+      <stop offset="70%" stop-color="#b91c1c"/>
+      <stop offset="100%" stop-color="#7f1d1d"/>
+    </linearGradient>
+    <linearGradient id="capRed" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ef4444"/>
+      <stop offset="30%" stop-color="#fca5a5"/>
+      <stop offset="60%" stop-color="#dc2626"/>
+      <stop offset="100%" stop-color="#991b1b"/>
+    </linearGradient>
+    <filter id="dropShadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="15" stdDeviation="15" flood-color="#000" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="600" height="750" fill="url(#bgGrad)"/>
+
+  <!-- Brand Background Accent Circle -->
+  <circle cx="300" cy="380" r="220" fill="#fee2e2" opacity="0.6"/>
+
+  <!-- Authentic NIVEA Cardboard Pack Backing -->
+  <g filter="url(#dropShadow)">
+    <rect x="140" y="80" width="320" height="580" rx="24" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+    
+    <!-- Top Header Ribbon -->
+    <path d="M 140 104 C 140 90.7 150.7 80 164 80 L 436 80 C 449.3 80 460 90.7 460 104 L 460 200 L 140 200 Z" fill="url(#niveaBlue)"/>
+    
+    <!-- NIVEA Logo -->
+    <rect x="230" y="95" width="140" height="42" rx="4" fill="#002b66"/>
+    <text x="300" y="125" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif" font-size="28" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3">NIVEA</text>
+    
+    <!-- Pack badge -->
+    <text x="300" y="165" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif" font-size="13" font-weight="700" fill="#93c5fd" text-anchor="middle" letter-spacing="1.5">24H MELT-IN MOISTURE</text>
+    <text x="300" y="185" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif" font-size="11" font-weight="600" fill="#e0f2fe" text-anchor="middle">NATURAL OILS • SHEA BUTTER</text>
+
+    <!-- Cherry Illustration on Card -->
+    <g transform="translate(350, 240)">
+      <circle cx="20" cy="40" r="22" fill="url(#cherryRed)"/>
+      <circle cx="45" cy="50" r="20" fill="url(#cherryRed)"/>
+      <path d="M 20 20 Q 30 0 35 -15" stroke="#15803d" stroke-width="3" fill="none"/>
+      <path d="M 45 30 Q 40 5 35 -15" stroke="#15803d" stroke-width="3" fill="none"/>
+      <path d="M 35 -15 Q 55 -30 65 -20 Q 55 -5 35 -15" fill="#22c55e"/>
+    </g>
+
+    <!-- Product Stick Container -->
+    <!-- Lower Base -->
+    <rect x="245" y="440" width="110" height="180" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    <rect x="245" y="440" width="110" height="180" rx="8" fill="url(#niveaBlue)"/>
+    <text x="300" y="530" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="18" font-weight="900" fill="#ffffff" text-anchor="middle" transform="rotate(-90, 300, 530)" letter-spacing="3">NIVEA</text>
+
+    <!-- Top Cap with Red Cherry Gradient -->
+    <rect x="248" y="240" width="104" height="200" rx="16" fill="url(#capRed)"/>
+    <rect x="254" y="244" width="20" height="192" rx="6" fill="#ffffff" opacity="0.3"/>
+    
+    <!-- Cherry Shine Typography on Cap -->
+    <text x="300" y="320" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="16" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">CHERRY</text>
+    <text x="300" y="340" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="13" font-weight="600" fill="#fef08a" text-anchor="middle" font-style="italic">Shine</text>
+    <text x="300" y="375" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">RUBY RED TINT</text>
+
+    <!-- Lower Card Details -->
+    <text x="300" y="640" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a" text-anchor="middle">CHERRY CARING LIP BALM • 4.8g</text>
+  </g>
+</svg>

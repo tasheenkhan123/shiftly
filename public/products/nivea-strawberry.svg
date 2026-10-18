@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750" width="600" height="750">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#fff1f2"/>
+    </linearGradient>
+    <linearGradient id="niveaBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#002b66"/>
+      <stop offset="100%" stop-color="#001a40"/>
+    </linearGradient>
+    <linearGradient id="strawbPink" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#fb7185"/>
+      <stop offset="30%" stop-color="#fecdd3"/>
+      <stop offset="60%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#e11d48"/>
+    </linearGradient>
+    <filter id="dropShadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="15" stdDeviation="15" flood-color="#000" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="600" height="750" fill="url(#bgGrad)"/>
+  <circle cx="300" cy="380" r="220" fill="#ffe4e6" opacity="0.6"/>
+
+  <g filter="url(#dropShadow)">
+    <rect x="140" y="80" width="320" height="580" rx="24" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+    
+    <!-- Top Header -->
+    <path d="M 140 104 C 140 90.7 150.7 80 164 80 L 436 80 C 449.3 80 460 90.7 460 104 L 460 200 L 140 200 Z" fill="url(#niveaBlue)"/>
+    
+    <!-- Logo -->
+    <rect x="230" y="95" width="140" height="42" rx="4" fill="#002b66"/>
+    <text x="300" y="125" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="28" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3">NIVEA</text>
+    
+    <text x="300" y="165" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="13" font-weight="700" fill="#93c5fd" text-anchor="middle" letter-spacing="1.5">24H MELT-IN MOISTURE</text>
+    <text x="300" y="185" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="11" font-weight="600" fill="#e0f2fe" text-anchor="middle">NATURAL OILS • SHEA BUTTER</text>
+
+    <!-- Strawberry Illustration -->
+    <g transform="translate(360, 240)">
+      <path d="M 10 20 Q 35 15 50 35 Q 40 70 25 80 Q 5 60 10 20 Z" fill="#f43f5e"/>
+      <circle cx="20" cy="35" r="2" fill="#fef08a"/>
+      <circle cx="35" cy="45" r="2" fill="#fef08a"/>
+      <circle cx="25" cy="60" r="2" fill="#fef08a"/>
+      <path d="M 20 15 Q 25 5 28 -5 Q 32 5 35 15" stroke="#15803d" stroke-width="3" fill="none"/>
+    </g>
+
+    <!-- Base -->
+    <rect x="245" y="440" width="110" height="180" rx="8" fill="url(#niveaBlue)"/>
+    <text x="300" y="530" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="18" font-weight="900" fill="#ffffff" text-anchor="middle" transform="rotate(-90, 300, 530)" letter-spacing="3">NIVEA</text>
+
+    <!-- Top Cap Pink/Coral -->
+    <rect x="248" y="240" width="104" height="200" rx="16" fill="url(#strawbPink)"/>
+    <rect x="254" y="244" width="20" height="192" rx="6" fill="#ffffff" opacity="0.3"/>
+    
+    <text x="300" y="320" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="14" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">STRAWBERRY</text>
+    <text x="300" y="340" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="13" font-weight="600" fill="#fef08a" text-anchor="middle" font-style="italic">Shine</text>
+    <text x="300" y="375" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="10" font-weight="700" fill="#ffffff" text-anchor="middle" letter-spacing="0.5">CORAL PINK TINT</text>
+
+    <text x="300" y="640" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a" text-anchor="middle">STRAWBERRY CARING LIP BALM • 4.8g</text>
+  </g>
+</svg>

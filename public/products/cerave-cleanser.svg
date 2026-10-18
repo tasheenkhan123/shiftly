@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 750" width="600" height="750">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f0f9ff"/>
+    </linearGradient>
+    <linearGradient id="ceraveBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+    <filter id="dropShadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="15" stdDeviation="15" flood-color="#000" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect width="600" height="750" fill="url(#bgGrad)"/>
+  <circle cx="300" cy="380" r="220" fill="#e0f2fe" opacity="0.5"/>
+
+  <g filter="url(#dropShadow)">
+    <!-- Pump -->
+    <rect x="290" y="90" width="20" height="50" fill="#0284c7"/>
+    <path d="M 270 90 L 330 90 L 330 110 L 250 110 Z" fill="#0369a1"/>
+    <rect x="280" y="140" width="40" height="20" rx="4" fill="#cbd5e1"/>
+    <rect x="285" y="160" width="30" height="20" fill="#94a3b8"/>
+
+    <!-- Bottle -->
+    <rect x="200" y="180" width="200" height="420" rx="28" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+    
+    <!-- Blue Side Banner -->
+    <path d="M 200 208 C 200 192.5 212.5 180 228 180 L 235 180 L 235 600 L 228 600 C 212.5 600 200 587.5 200 572 Z" fill="url(#ceraveBlue)"/>
+
+    <!-- CeraVe Logo -->
+    <text x="315" y="240" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="28" font-weight="900" fill="#0284c7" text-anchor="middle" letter-spacing="1">CeraVe</text>
+    <text x="315" y="260" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="9" font-weight="700" fill="#64748b" text-anchor="middle">DEVELOPED WITH DERMATOLOGISTS</text>
+
+    <!-- SA Smoothing Cleanser Title -->
+    <text x="315" y="305" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="16" font-weight="900" fill="#0f172a" text-anchor="middle">SA Smoothing</text>
+    <text x="315" y="325" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="16" font-weight="900" fill="#0f172a" text-anchor="middle">Cleanser</text>
+
+    <text x="315" y="360" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="10" font-weight="700" fill="#0284c7" text-anchor="middle">For Dry, Rough, Bumpy Skin</text>
+
+    <text x="315" y="400" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="10" font-weight="600" fill="#475569" text-anchor="middle">Gently cleanses &amp; exfoliates</text>
+    <text x="315" y="420" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="10" font-weight="600" fill="#475569" text-anchor="middle">With 3 Essential Ceramides,</text>
+    <text x="315" y="440" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="10" font-weight="600" fill="#475569" text-anchor="middle">Salicylic Acid &amp; Hyaluronic Acid</text>
+
+    <line x1="250" y1="480" x2="380" y2="480" stroke="#e2e8f0" stroke-width="1.5"/>
+
+    <text x="315" y="525" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="12" font-weight="800" fill="#0f172a" text-anchor="middle">236 ml / 8 fl. oz.</text>
+
+    <text x="300" y="640" font-family="-apple-system, BlinkMacSystemFont, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a" text-anchor="middle">CERAVE SA SMOOTHING CLEANSER</text>
+  </g>
+</svg>

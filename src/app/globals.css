@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222 47% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222 47% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 217 91% 60%;
+    --radius: 0.75rem;
+  }
+}
+
+body {
+  color: #0f172a;
+  background: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* WhatsApp / iPhone iOS Blue Chat Bubble */
+.bubble-user {
+  background-color: #007AFF;
+  color: #ffffff;
+  border-radius: 1.25rem 1.25rem 0.25rem 1.25rem;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.18);
+}
+
+.bubble-assistant {
+  background-color: #f8fafc;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+  border-radius: 1.25rem 1.25rem 1.25rem 0.25rem;
+}
+
+/* Clean White Card */
+.white-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.02);
+}
+
+.white-card-hover {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.white-card-hover:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+/* Chat Input Floating Bar */
+.chat-input-bar {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.08), 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.chat-input-bar:focus-within {
+  border-color: #007AFF;
+  box-shadow: 0 4px 24px -2px rgba(0, 122, 255, 0.15), 0 0 0 1px #007AFF;
+}
+
+/* Scrollbar Minimalist */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
