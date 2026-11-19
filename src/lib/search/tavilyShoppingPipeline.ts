@@ -8,6 +8,8 @@ import {
   MatchTier
 } from '@/types';
 import { extractBrand } from '../ai/pipeline';
+import { callGeminiJson } from '../ai/gemini';
+import { findProductsOnGoogleShopping, isGoogleShoppingConfigured } from './googleShoppingProvider';
 
 export interface ConversationTurn {
   sender: 'user' | 'assistant';
@@ -18,6 +20,7 @@ export interface ConversationTurn {
 export interface BundleComponentPlan {
   componentName: string;
   searchQuery: string;
+  shoppingQuery?: string;
   allocatedBudget: number;
 }
 
@@ -25,6 +28,7 @@ export interface ParsedShoppingIntent {
   isBundleOrSetup: boolean;
   bundleComponents?: BundleComponentPlan[];
   searchQuery: string;
+  shoppingQuery: string;
   cleanTarget: string;
   category: 'Fashion' | 'Bags' | 'Skincare' | 'Computers & Electronics' | 'Gaming Setup' | 'Home & Lifestyle' | 'Other';
   budgetMax: number | null;
@@ -105,6 +109,16 @@ async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2)
     }
   }
   throw lastError;
+}
+
+/**
+ * Reads an INR price like "₹1,299", "Rs. 499" or "INR 12,999.00" from text. Returns null when none is found.
+ */
+export function parseInrPrice(text: string): number | null {
+  const m = (text || '').match(/(?:₹|Rs\.?|INR)\s*([0-9]{1,3}(?:,[0-9]{2,3})+|[0-9]{2,7})(?:\.[0-9]{1,2})?/i);
+  if (!m) return null;
+  const n = parseInt(m[1].replace(/,/g, ''), 10);
+  return n >= 20 && n <= 1000000 ? n : null;
 }
 
 /**
@@ -417,8 +431,6 @@ export async function understandShoppingQuery(
   constraints?: UserConstraints,
   conversationHistory?: ConversationTurn[]
 ): Promise<ParsedShoppingIntent> {
-  const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
-  
   // Format conversational context
   let historyText = '';
   if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
@@ -482,11 +494,13 @@ Output strictly valid JSON matching this schema:
     {
       "componentName": "Component name (e.g. Gaming PC, Gaming Monitor, Mechanical Keyboard, Gaming Mouse)",
       "searchQuery": "Search query designed to find this component in India (e.g. 'best prebuilt gaming pc rtx 3060 under 65000 India Amazon Flipkart')",
+      "shoppingQuery": "Short Google Shopping query for this component, 2-6 words, product type plus key specs, no store names, no budget (e.g. 'gaming pc rtx 3060')",
       "allocatedBudget": number in INR
     }
   ],
   "cleanTarget": "clean target item or setup name",
   "searchQuery": "main search query if not bundle",
+  "shoppingQuery": "Short Google Shopping query, 2-6 words: product type plus key attributes and preferences (e.g. 'salicylic acid face wash oily skin'). No store names, no budget, no words like best/buy/under.",
   "category": "Skincare" | "Computers & Electronics" | "Fashion" | "Bags" | "Gaming Setup" | "Home & Lifestyle" | "Other",
   "budgetMax": number in INR or null,
   "totalBudget": number in INR or null,
@@ -499,52 +513,34 @@ Output strictly valid JSON matching this schema:
   "excludedProductTitles": ["title1", "title2"]
 }`;
 
-  for (const model of models) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiApiKey)}`;
-      const res = await fetchWithRetry(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
-        })
-      });
+  const parsed = await callGeminiJson<any>(prompt, geminiApiKey, { label: 'intent', timeoutMs: 8000, totalTimeoutMs: 14000 });
+  if (parsed && typeof parsed === 'object') {
+    const cleanTarget = parsed.cleanTarget || rawInput.replace(/find|three|best|the|buy|under|\d+|₹/gi, '').trim() || 'product';
 
-      if (!res.ok) continue;
-      const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        const parsed = JSON.parse(text);
-        const cleanTarget = parsed.cleanTarget || rawInput.replace(/find|three|best|the|buy|under|\d+|₹/gi, '').trim() || 'product';
-        
-        let finalCount = 3;
-        if (typeof parsed.requestedCount === 'number' && parsed.requestedCount > 0) {
-          finalCount = Math.min(10, Math.max(1, parsed.requestedCount));
-        } else if (regexExtractedCount > 0) {
-          finalCount = Math.min(10, Math.max(1, regexExtractedCount));
-        }
-
-        return {
-          isBundleOrSetup: Boolean(parsed.isBundleOrSetup),
-          bundleComponents: Array.isArray(parsed.bundleComponents) ? parsed.bundleComponents : [],
-          cleanTarget,
-          searchQuery: parsed.searchQuery || `best ${cleanTarget} ${parsed.budgetMax ? 'under ' + parsed.budgetMax : ''} buy online India price Amazon Nykaa Flipkart`,
-          category: parsed.category || 'Other',
-          budgetMax: typeof parsed.budgetMax === 'number' ? parsed.budgetMax : (constraints?.budgetMax || null),
-          totalBudget: typeof parsed.totalBudget === 'number' ? parsed.totalBudget : (constraints?.budgetMax || null),
-          requestedCount: finalCount,
-          preferredBrands: Array.isArray(parsed.preferredBrands) ? parsed.preferredBrands : [],
-          priorities: Array.isArray(parsed.priorities) ? parsed.priorities : [],
-          needsClarification: Boolean(parsed.needsClarification),
-          clarificationQuestion: parsed.clarificationQuestion || null,
-          appliedPreferences: Array.isArray(parsed.appliedPreferences) ? parsed.appliedPreferences : [],
-          excludedProductTitles: Array.isArray(parsed.excludedProductTitles) ? parsed.excludedProductTitles : []
-        };
-      }
-    } catch {
-      // Continue to next model on error
+    let finalCount = 3;
+    if (typeof parsed.requestedCount === 'number' && parsed.requestedCount > 0) {
+      finalCount = Math.min(10, Math.max(1, parsed.requestedCount));
+    } else if (regexExtractedCount > 0) {
+      finalCount = Math.min(10, Math.max(1, regexExtractedCount));
     }
+
+    return {
+      isBundleOrSetup: Boolean(parsed.isBundleOrSetup),
+      bundleComponents: Array.isArray(parsed.bundleComponents) ? parsed.bundleComponents : [],
+      cleanTarget,
+      searchQuery: parsed.searchQuery || `best ${cleanTarget} ${parsed.budgetMax ? 'under ' + parsed.budgetMax : ''} buy online India price Amazon Nykaa Flipkart`,
+      shoppingQuery: (typeof parsed.shoppingQuery === 'string' && parsed.shoppingQuery.trim()) || cleanTarget,
+      category: parsed.category || 'Other',
+      budgetMax: typeof parsed.budgetMax === 'number' ? parsed.budgetMax : (constraints?.budgetMax || null),
+      totalBudget: typeof parsed.totalBudget === 'number' ? parsed.totalBudget : (constraints?.budgetMax || null),
+      requestedCount: finalCount,
+      preferredBrands: Array.isArray(parsed.preferredBrands) ? parsed.preferredBrands : [],
+      priorities: Array.isArray(parsed.priorities) ? parsed.priorities : [],
+      needsClarification: Boolean(parsed.needsClarification),
+      clarificationQuestion: parsed.clarificationQuestion || null,
+      appliedPreferences: Array.isArray(parsed.appliedPreferences) ? parsed.appliedPreferences : [],
+      excludedProductTitles: Array.isArray(parsed.excludedProductTitles) ? parsed.excludedProductTitles : []
+    };
   }
 
   // Safe Fallback Parsing
@@ -554,6 +550,7 @@ Output strictly valid JSON matching this schema:
     isBundleOrSetup: isSetupOrBundle,
     bundleComponents: [],
     cleanTarget: cleanFallbackTarget,
+    shoppingQuery: cleanFallbackTarget,
     searchQuery: `best ${cleanFallbackTarget} ${constraints?.budgetMax ? 'under ' + constraints.budgetMax : ''} buy online India price Amazon Flipkart Nykaa`,
     category: 'Other',
     budgetMax: constraints?.budgetMax || null,
@@ -632,7 +629,6 @@ export async function extractProductsFromEvidence(
   tavilyData: TavilySearchApiResponse,
   geminiApiKey: string
 ): Promise<{ summary: string; candidates: ExtractedProductCandidate[] }> {
-  const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   const results = tavilyData.results || [];
 
   if (results.length === 0) {
@@ -700,31 +696,12 @@ Respond STRICTLY in JSON format matching this schema:
   ]
 }`;
 
-  for (const model of models) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(geminiApiKey)}`;
-      const res = await fetchWithRetry(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
-        })
-      });
-
-      if (!res.ok) continue;
-      const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        const parsed = JSON.parse(text);
-        return {
-          summary: parsed.summary || `I found products for "${rawInput}" on live retailers.`,
-          candidates: Array.isArray(parsed.candidates) ? parsed.candidates : []
-        };
-      }
-    } catch {
-      // Continue to next model on error
-    }
+  const parsed = await callGeminiJson<any>(prompt, geminiApiKey, { label: 'extract' });
+  if (parsed && typeof parsed === 'object') {
+    return {
+      summary: parsed.summary || `I found products for "${rawInput}" on live retailers.`,
+      candidates: Array.isArray(parsed.candidates) ? parsed.candidates : []
+    };
   }
 
   return {
@@ -874,14 +851,15 @@ export function rankProductCandidates(
         existing.otherOffers.push({
           id: `m_offer_${Date.now()}_${Math.random().toString(36).substring(7)}`,
           sellerName: s.candidate.merchant || extractMerchantName(cleanedUrl),
-          price: s.candidate.price || existing.candidate.price || (parsedIntent.budgetMax || 499),
+          price: typeof s.candidate.price === 'number' && s.candidate.price > 0 ? s.candidate.price : 0,
+          priceKnown: typeof s.candidate.price === 'number' && s.candidate.price > 0,
           currency: 'INR',
           productUrl: cleanedUrl,
           urlType: isDir ? 'PRODUCT' : 'SEARCH',
-          availability: 'AVAILABLE',
+          availability: 'UNKNOWN',
           source: `Discovered on ${s.candidate.merchant || 'Web'}`,
-          verified: isDir,
-          inStock: isDir,
+          verified: false,
+          inStock: false,
           deliveryEstimate: isDir ? 'Direct Product Listing' : 'Store Search Listing',
           isLowestPrice: false,
           verifiedAt: typeof s.candidate.price === 'number' ? 'Live Web Evidence' : 'Store Listing'
@@ -1012,16 +990,8 @@ export async function resolveProductDetailsAndOffers(
 
         const seller = extractMerchantName(cleaned, r.title);
 
-        let offerPrice = c.price;
-        if (!offerPrice || offerPrice <= 0) {
-          const priceMatch = (r.content + ' ' + r.title).match(/(?:₹|Rs\.?|INR)\s*([0-9]{2,5})(?:\b|\.|\s)/i);
-          if (priceMatch) {
-            const parsedNum = parseInt(priceMatch[1], 10);
-            if (parsedNum >= 50 && parsedNum <= 150000) {
-              offerPrice = parsedNum;
-            }
-          }
-        }
+        // Price must come from THIS store's own result, never copied from another store
+        const offerPrice = parseInrPrice(r.title + ' ' + r.content);
 
         if (!c.isDirectProductPage && !isDirectProductUrl(c.sourceUrl)) {
           c.sourceUrl = cleaned;
@@ -1036,17 +1006,18 @@ export async function resolveProductDetailsAndOffers(
             scored.otherOffers.push({
               id: `m_exact_${Date.now()}_${Math.random().toString(36).substring(7)}`,
               sellerName: seller,
-              price: offerPrice || c.price || 499,
+              price: offerPrice || 0,
+              priceKnown: Boolean(offerPrice),
               currency: 'INR',
               productUrl: cleaned,
               urlType: 'PRODUCT',
-              availability: 'AVAILABLE',
-              source: `Live Product Page (${seller})`,
-              verified: true,
-              inStock: true,
+              availability: 'UNKNOWN',
+              source: `Search snippet (${seller})`,
+              verified: false,
+              inStock: false,
               deliveryEstimate: 'Direct Product Listing',
               isLowestPrice: false,
-              verifiedAt: 'Live Web Page'
+              verifiedAt: 'Web search snippet (may be outdated)'
             });
           }
         }
@@ -1113,28 +1084,31 @@ function createProductMatchFromScored(
   const c = s.candidate;
   const isDirect = isDirectProductUrl(c.sourceUrl) && Boolean(c.isDirectProductPage);
   const isExplicitPrice = typeof c.price === 'number' && c.price > 0 && c.price < 500000;
-  let price = isExplicitPrice ? Math.round(c.price!) : (allocatedBudget ? Math.round(allocatedBudget * 0.85) : 499);
-  if (allocatedBudget && price > allocatedBudget * 1.3) {
-    price = Math.round(allocatedBudget * 0.9);
-  }
+  // Never invent a price: unknown prices are 0 with priceKnown=false and the UI shows "Check price"
+  const price = isExplicitPrice ? Math.round(c.price!) : 0;
 
   const primaryOffer: MerchantOffer = {
     id: `m_primary_${idx}_${Date.now()}`,
     sellerName: c.merchant || extractMerchantName(c.sourceUrl),
     price: price,
+    priceKnown: isExplicitPrice,
     currency: 'INR',
     productUrl: c.sourceUrl,
     urlType: isDirect ? 'PRODUCT' : 'SEARCH',
-    availability: 'AVAILABLE',
+    availability: 'UNKNOWN',
     source: `Discovered on ${c.merchant || 'Web'}`,
-    verified: isDirect,
-    inStock: isDirect,
+    verified: false,
+    inStock: false,
     deliveryEstimate: isDirect ? 'Direct Product Listing' : 'Store Search Listing',
-    isLowestPrice: true,
-    verifiedAt: isExplicitPrice ? 'Live Web Evidence' : 'Estimated from Budget'
+    isLowestPrice: false,
+    verifiedAt: 'Web search snippet (may be outdated)'
   };
 
   const allOffers = [primaryOffer, ...s.otherOffers];
+  const knownOffers = allOffers.filter(o => o.priceKnown !== false && o.price > 0);
+  knownOffers.sort((a, b) => a.price - b.price);
+  if (knownOffers[0]) knownOffers[0].isLowestPrice = true;
+  const lowestKnown = knownOffers[0]?.price ?? 0;
   const safeImageUrl = (c.imageUrl && c.imageUrl.trim().length > 0) ? c.imageUrl.trim() : '';
 
   const keyAttrs: Record<string, string> = { ...(c.keyAttributes || {}) };
@@ -1145,7 +1119,7 @@ function createProductMatchFromScored(
     keyAttrs['Allocated Budget'] = `₹${allocatedBudget.toLocaleString()}`;
   }
   keyAttrs['Store'] = c.merchant || 'Retailer';
-  keyAttrs['Price Info'] = isExplicitPrice ? `₹${price.toLocaleString()} (Verified)` : 'Price at Store';
+  keyAttrs['Price Info'] = isExplicitPrice ? `₹${price.toLocaleString()} (from search snippet)` : 'Check price at store';
 
   return {
     id: `match_${entityId}_${idx}_${Date.now()}`,
@@ -1158,8 +1132,8 @@ function createProductMatchFromScored(
     matchReasons: [
       c.evidenceSnippet || `Discovered on ${c.merchant || 'Web'}`,
       isExplicitPrice
-        ? `Price: ₹${price.toLocaleString()} verified in live web evidence`
-        : `Estimated price (~₹${price.toLocaleString()})`,
+        ? `Price ₹${price.toLocaleString()} seen in a web search snippet (may be outdated)`
+        : 'Price not found in search results',
       isDirect ? `Direct product page on ${primaryOffer.sellerName}` : `Store listing on ${primaryOffer.sellerName}`
     ],
     scoreBreakdown: {
@@ -1171,7 +1145,9 @@ function createProductMatchFromScored(
       budgetFitBonus: Math.round(s.budgetScore * 3.3),
       totalScore: s.totalScore
     },
-    lowestPrice: price,
+    lowestPrice: lowestKnown,
+    priceKnown: knownOffers.length > 0,
+    dataSource: 'Web search',
     currency: 'INR',
     availableMerchantsCount: allOffers.length,
     merchants: allOffers,
@@ -1238,6 +1214,18 @@ export async function searchProductsWithTavilyAndGemini(
     }
 
     const entityId = `entity_${Date.now()}`;
+
+    // ==========================================
+    // PREFERRED: Google Shopping (real listings, real prices, real store comparison)
+    // ==========================================
+    if (isGoogleShoppingConfigured()) {
+      try {
+        const gs = await runGoogleShoppingFlow(rawInput, parsedIntent, geminiApiKey, startTime, imagePreviewUrl, constraints);
+        if (gs) return gs;
+      } catch (err: any) {
+        console.error('[google-shopping] failed, falling back to Tavily web search:', err?.message);
+      }
+    }
 
     // ==========================================
     // CASE A: COMPLETE SETUP / BUNDLE REQUEST
@@ -1320,32 +1308,9 @@ export async function searchProductsWithTavilyAndGemini(
 
       if (detectedEntities.length > 0) {
         // Calculate starter usable configuration cost from the #1 alternative of each component
-        let starterUsableCost = detectedEntities.reduce(
-          (sum, ent) => sum + (productMatches[ent.id]?.[0]?.lowestPrice || 0), 
-          0
-        );
-
-        // If starter combination exceeds total budget, pick the cheapest alternative from each category to ensure a valid combination
-        if (parsedIntent.totalBudget && starterUsableCost > parsedIntent.totalBudget) {
-          const budgetCombinationCost = detectedEntities.reduce((sum, ent) => {
-            const minPrice = Math.min(...(productMatches[ent.id] || []).map(p => p.lowestPrice));
-            return sum + minPrice;
-          }, 0);
-          if (budgetCombinationCost <= parsedIntent.totalBudget) {
-            starterUsableCost = budgetCombinationCost;
-          }
-        }
-
         const targetBudgetFormatted = parsedIntent.totalBudget ? `₹${parsedIntent.totalBudget.toLocaleString()}` : 'your target budget';
 
-        const summaryText = `Here is a complete, coordinated **${parsedIntent.cleanTarget}** tailored to ${targetBudgetFormatted}.\n` +
-          `Below, I have organized **up to 3 verified alternatives per component category** so you can compare and choose your preferred setup.\n\n` +
-          `Recommended balanced starter configuration (Total: **₹${starterUsableCost.toLocaleString()}**):\n` +
-          detectedEntities.map(ent => {
-            const p = productMatches[ent.id]?.[0];
-            return p ? `• **${ent.name}**: ${p.brand} ${p.title} (₹${p.lowestPrice.toLocaleString()})` : '';
-          }).filter(Boolean).join('\n') +
-          `\n\nThis complete configuration fits within your total budget. You can customize your setup using the alternatives in each category below!`;
+        const summaryText = buildBundleSummary(parsedIntent, detectedEntities, productMatches, targetBudgetFormatted);
 
         const analysisResult: SiftlyAnalysisResult = {
           id: `siftly_${Date.now()}`,
@@ -1510,6 +1475,163 @@ export async function searchProductsWithTavilyAndGemini(
       constraints
     );
   }
+}
+
+/**
+ * Honest bundle summary: totals only count confirmed prices and only claim "fits budget" when it does.
+ */
+function buildBundleSummary(
+  parsedIntent: ParsedShoppingIntent,
+  entities: DetectedEntity[],
+  productMatches: Record<string, ProductMatch[]>,
+  targetBudgetFormatted: string
+): string {
+  const picks = entities.map(ent => ({ ent, p: productMatches[ent.id]?.[0] })).filter(x => x.p);
+  const knownTotal = picks.reduce((sum, x) => sum + (x.p!.priceKnown !== false ? x.p!.lowestPrice : 0), 0);
+  const unknownCount = picks.filter(x => x.p!.priceKnown === false).length;
+
+  const lines = picks.map(({ ent, p }) => {
+    const priceStr = p!.priceKnown === false ? 'check price' : `₹${p!.lowestPrice.toLocaleString('en-IN')}`;
+    return `• **${ent.name}**: ${p!.title} (${priceStr})`;
+  });
+
+  let budgetLine = '';
+  if (parsedIntent.totalBudget) {
+    if (unknownCount > 0) {
+      budgetLine = `${unknownCount} item price${unknownCount > 1 ? 's' : ''} could not be confirmed, so check the final total before buying.`;
+    } else if (knownTotal <= parsedIntent.totalBudget) {
+      budgetLine = `That comes to ₹${knownTotal.toLocaleString('en-IN')}, within your ${targetBudgetFormatted} budget.`;
+    } else {
+      budgetLine = `That comes to ₹${knownTotal.toLocaleString('en-IN')}, which is over your ${targetBudgetFormatted} budget. Pick cheaper alternatives below to bring it down.`;
+    }
+  }
+
+  return (`Here is a **${parsedIntent.cleanTarget}** for ${targetBudgetFormatted}, with up to 3 options per part.\n\n` +
+    `Suggested starter set:\n${lines.join('\n')}\n\n${budgetLine}`).trim();
+}
+
+/**
+ * Google Shopping flow (SerpApi). Returns null if nothing usable was found, so the caller can fall back.
+ */
+async function runGoogleShoppingFlow(
+  rawInput: string,
+  parsedIntent: ParsedShoppingIntent,
+  geminiApiKey: string,
+  startTime: number,
+  imagePreviewUrl?: string,
+  constraints?: UserConstraints
+): Promise<{ result: SiftlyAnalysisResult; assistantSummary: string; isGroundingActive: boolean } | null> {
+  const base = {
+    userRequest: rawInput,
+    preferences: [...(parsedIntent.appliedPreferences || []), ...(parsedIntent.priorities || [])],
+    excludeTitles: parsedIntent.excludedProductTitles || [],
+    geminiKey: geminiApiKey,
+  };
+  const makeEntity = (id: string, name: string, query: string): DetectedEntity => ({
+    id,
+    name,
+    category: parsedIntent.category as DetectedEntity['category'],
+    productType: name,
+    brand: '',
+    brandConfidence: 'unknown',
+    confidenceScore: 90,
+    attributes: { category: parsedIntent.category, productType: name, brandConfidence: 'unknown', color: '' },
+    optimizedSearchQuery: query,
+  });
+  const resultBase = (entities: DetectedEntity[], matches: Record<string, ProductMatch[]>, queries: string[]): SiftlyAnalysisResult => ({
+    id: `siftly_${Date.now()}`,
+    inputType: imagePreviewUrl ? 'IMAGE' : 'TEXT',
+    intent: 'SHOPPING',
+    primaryCategory: parsedIntent.category as any,
+    rawInput,
+    mediaPreviewUrl: imagePreviewUrl,
+    userConstraints: constraints || { currency: 'INR' },
+    detectedEntities: entities,
+    productMatches: matches,
+    isGroundingActive: true,
+    searchQueries: queries,
+    groundingSources: [],
+    executionTimeMs: Date.now() - startTime,
+  });
+
+  // ---- Setup / bundle ----
+  if (parsedIntent.isBundleOrSetup && parsedIntent.bundleComponents && parsedIntent.bundleComponents.length > 0) {
+    const comps = parsedIntent.bundleComponents.slice(0, 5);
+    const results = await Promise.allSettled(
+      comps.map(async (comp, i) => {
+        const id = `entity_comp_${i}_${Date.now()}`;
+        const q = (comp.shoppingQuery && comp.shoppingQuery.trim()) || comp.componentName;
+        const { matches } = await findProductsOnGoogleShopping({
+          ...base,
+          shoppingQuery: q,
+          target: comp.componentName,
+          budgetMax: comp.allocatedBudget || null,
+          count: 3,
+          entityId: id,
+          componentName: comp.componentName,
+          allocatedBudget: comp.allocatedBudget,
+          storeLookups: 1, // only the top pick per part gets a full store comparison, to save API calls
+        });
+        return { entity: makeEntity(id, comp.componentName, q), matches };
+      })
+    );
+    const entities: DetectedEntity[] = [];
+    const matches: Record<string, ProductMatch[]> = {};
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value.matches.length > 0) {
+        entities.push(r.value.entity);
+        matches[r.value.entity.id] = r.value.matches;
+      } else if (r.status === 'rejected') {
+        console.warn('[google-shopping] component search failed:', r.reason?.message);
+      }
+    }
+    if (entities.length === 0) return null;
+    const budgetStr = parsedIntent.totalBudget ? `₹${parsedIntent.totalBudget.toLocaleString('en-IN')}` : 'your budget';
+    return {
+      result: resultBase(entities, matches, comps.map(c => c.shoppingQuery || c.componentName)),
+      assistantSummary: buildBundleSummary(parsedIntent, entities, matches, budgetStr),
+      isGroundingActive: true,
+    };
+  }
+
+  // ---- Single product ----
+  const entityId = `entity_${Date.now()}`;
+  const count = parsedIntent.requestedCount || 3;
+  const { matches, listingsFound } = await findProductsOnGoogleShopping({
+    ...base,
+    shoppingQuery: parsedIntent.shoppingQuery || parsedIntent.cleanTarget,
+    target: parsedIntent.cleanTarget,
+    budgetMax: parsedIntent.budgetMax,
+    count,
+    entityId,
+    storeLookups: Math.min(count, 3),
+  });
+
+  const budgetStr = parsedIntent.budgetMax ? ` under ₹${parsedIntent.budgetMax.toLocaleString('en-IN')}` : '';
+  if (matches.length === 0) {
+    return createEmptyResponse(
+      rawInput,
+      listingsFound > 0
+        ? `I found ${listingsFound} listings for **${parsedIntent.cleanTarget}**, but none matched${budgetStr}. Try raising the budget a little or describing the product differently.`
+        : `I could not find **${parsedIntent.cleanTarget}** on Google Shopping. Try describing it differently.`,
+      startTime,
+      constraints
+    );
+  }
+
+  const lines = matches.map((m, i) => {
+    const price = m.priceKnown === false ? 'check price' : `from ₹${m.lowestPrice.toLocaleString('en-IN')}`;
+    const stores = m.merchants.length > 1 ? ` across ${m.merchants.length} stores` : ` at ${m.merchants[0]?.sellerName}`;
+    return `${i + 1}. **${m.title}**: ${price}${stores}${m.whyPicked ? `. ${m.whyPicked}` : ''}`;
+  });
+  const prefs = parsedIntent.appliedPreferences?.length ? ` (${parsedIntent.appliedPreferences.join(', ')})` : '';
+  const summary = `Here are the top ${matches.length} **${parsedIntent.cleanTarget}**${budgetStr}${prefs}:\n\n${lines.join('\n')}\n\nOpen **Compare stores** on any product to see every store's price and offers.`;
+
+  return {
+    result: resultBase([makeEntity(entityId, parsedIntent.cleanTarget, parsedIntent.shoppingQuery)], { [entityId]: matches }, [parsedIntent.shoppingQuery]),
+    assistantSummary: summary,
+    isGroundingActive: true,
+  };
 }
 
 /**

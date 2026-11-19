@@ -24,7 +24,7 @@ export const SavedLooksDrawer: React.FC<SavedLooksDrawerProps> = ({
   const rate = currency === 'USD' ? 0.012 : 1;
   const symbol = currency === 'USD' ? '$' : '₹';
 
-  const totalPrice = savedProducts.reduce((sum, p) => sum + p.lowestPrice, 0);
+  const totalPrice = savedProducts.reduce((sum, p) => sum + (p.priceKnown === false ? 0 : p.lowestPrice), 0);
   const displayTotal = Math.round(totalPrice * rate);
 
   return (
@@ -88,7 +88,7 @@ export const SavedLooksDrawer: React.FC<SavedLooksDrawerProps> = ({
                     <h4 className="text-xs font-bold text-white truncate">{product.title}</h4>
                     <div className="flex items-center justify-between mt-1">
                       <span className="text-xs font-extrabold text-white">
-                        {symbol}{price.toLocaleString()}
+                        {product.priceKnown === false ? 'Check price' : `${symbol}${price.toLocaleString()}`}
                       </span>
                       <span className="text-[10px] text-slate-400">
                         {product.merchants[0]?.sellerName || 'Verified Store'}

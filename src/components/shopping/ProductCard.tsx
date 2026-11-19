@@ -44,6 +44,24 @@ export const ProductCard: React.FC<ProductCardProps> = ({
   const isExactProduct = primaryMerchant?.urlType === 'PRODUCT';
   const isSearch = primaryMerchant?.urlType === 'SEARCH';
   const isAvailable = urlCheck.isValid && primaryMerchant?.urlType !== 'UNAVAILABLE';
+  const priceKnown = product.priceKnown !== false && product.lowestPrice > 0;
+  const fromGoogleShopping = product.dataSource === 'Google Shopping';
+  // A google.* link is a Google Shopping page, except /goto?url=... which redirects straight to the store
+  const linkIsGoogle = (() => {
+    try {
+      const u = new URL(primaryMerchant?.productUrl || '');
+      return /(^|\.)google\./i.test(u.hostname) && !u.pathname.startsWith('/goto');
+    } catch {
+      return false;
+    }
+  })();
+  const offerRegex = /off|cashback|bank|card|upi|coupon|emi|save/i;
+  const bestOfferEntry = product.merchants
+    .flatMap(m => (m.offers || []).map(o => ({ text: o, store: m.sellerName })))
+    .find(o => offerRegex.test(o.text));
+  const bestOffer = bestOfferEntry
+    ? (product.merchants.length > 1 ? `${bestOfferEntry.text} (${bestOfferEntry.store})` : bestOfferEntry.text)
+    : undefined;
 
   const getTierColor = (tier: string) => {
     switch (tier) {
@@ -208,15 +226,26 @@ export const ProductCard: React.FC<ProductCardProps> = ({
           <div className="flex items-center justify-between">
             <div>
               <span className="text-[9px] text-slate-400 uppercase tracking-wider block font-semibold">
-                {isExactProduct ? 'Verified Price' : 'Est. Price'}
+                {!priceKnown ? 'Price' : fromGoogleShopping ? (product.merchants.length > 1 ? 'Lowest price' : 'Price') : 'Price (from web snippet)'}
               </span>
-              <span className="text-base sm:text-lg font-bold text-slate-900">
-                {symbol}{displayPrice.toLocaleString()}
-              </span>
+              {priceKnown ? (
+                <span className="text-base sm:text-lg font-bold text-slate-900">
+                  {symbol}{displayPrice.toLocaleString()}
+                </span>
+              ) : (
+                <span className="text-sm font-semibold text-slate-500">Check price at store</span>
+              )}
+              {primaryMerchant?.originalPrice && priceKnown ? (
+                <span className="ml-1.5 text-xs text-slate-400 line-through">{symbol}{Math.round(primaryMerchant.originalPrice * rate).toLocaleString()}</span>
+              ) : null}
             </div>
 
             <div className="text-right">
-              {isExactProduct ? (
+              {fromGoogleShopping ? (
+                <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 justify-end">
+                  <CheckCircle2 className="w-3 h-3" /> {primaryMerchant?.sellerName}
+                </span>
+              ) : isExactProduct ? (
                 <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1 justify-end">
                   <CheckCircle2 className="w-3 h-3" /> Direct Product Page
                 </span>
@@ -226,10 +255,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 </span>
               )}
               <span className="text-[10px] text-slate-400">
-                {product.availableMerchantsCount} {product.availableMerchantsCount === 1 ? 'store link' : 'store links'}
+                {product.availableMerchantsCount} {product.availableMerchantsCount === 1 ? 'store' : 'stores'}
               </span>
             </div>
           </div>
+
+          {product.whyPicked && (
+            <p className="text-[11px] text-slate-600 leading-snug line-clamp-2">{product.whyPicked}</p>
+          )}
+          {bestOffer && (
+            <span className="w-fit px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-[10px] font-semibold text-amber-800 line-clamp-1">
+              {bestOffer}
+            </span>
+          )}
 
           {/* Action Buttons: Direct External Navigation & Compare Modal */}
           <div className="flex flex-col gap-1.5">
@@ -240,7 +278,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 {...SAFE_EXTERNAL_LINK_PROPS}
                 className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-all shadow-xs active:scale-[0.98]"
               >
-                {isExactProduct ? (
+                {linkIsGoogle ? (
+                  <>
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    <span>View on Google Shopping</span>
+                  </>
+                ) : isExactProduct ? (
                   <>
                     <ShoppingBag className="w-3.5 h-3.5" />
                     <span>Buy on {primaryMerchant.sellerName}</span>
@@ -269,7 +312,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
               className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-all active:scale-[0.98]"
             >
               <Store className="w-3.5 h-3.5 text-slate-500" />
-              <span>Compare {product.merchants.length} Stores</span>
+              <span>{product.merchants.length > 1 ? `Compare ${product.merchants.length} stores` : 'Store details'}</span>
             </button>
           </div>
         </div>

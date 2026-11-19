@@ -70,6 +70,14 @@ export interface MerchantOffer {
   isLowestPrice: boolean;
   verifiedAt: string;
   affiliateUrl?: string;
+  /** false when the store's price could not be confirmed (price is then 0 and must not be shown as a number) */
+  priceKnown?: boolean;
+  /** Offer text from the store listing, e.g. "10% off with HDFC cards", "Free delivery" */
+  offers?: string[];
+  discountLabel?: string;
+  tag?: string;
+  paymentMethods?: string;
+  shipping?: string;
 }
 
 export interface MatchScoreBreakdown {
@@ -100,6 +108,12 @@ export interface ProductMatch {
   keyAttributes: Record<string, string>;
   productRating?: number;
   reviewsCount?: number;
+  /** false when no store price could be confirmed */
+  priceKnown?: boolean;
+  /** One-line reason why this product was picked */
+  whyPicked?: string;
+  /** Where the data came from, e.g. "Google Shopping" or "Web search" */
+  dataSource?: string;
 }
 
 export interface RecipeIngredient {

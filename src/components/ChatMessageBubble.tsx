@@ -13,6 +13,7 @@ import { ChatMessage, ProductMatch } from '@/types';
 import { ProductCard } from '@/components/shopping/ProductCard';
 import { RecipeView } from '@/components/recipe/RecipeView';
 import { validateExternalUrl, SAFE_EXTERNAL_LINK_PROPS } from '@/lib/security/urlValidator';
+import { RichText } from '@/components/RichText';
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
@@ -104,15 +105,17 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           {isGroundingActive && (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold w-fit">
               <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Live Web Grounded (Tavily)</span>
+              <span>
+                {Object.values(message.analysisResult?.productMatches || {}).flat()[0]?.dataSource === 'Google Shopping'
+                  ? 'Live prices from Google Shopping'
+                  : 'Live web search'}
+              </span>
             </div>
           )}
 
           {/* Main Text Response */}
           {message.text && (
-            <p className="text-sm sm:text-base text-slate-800 leading-relaxed whitespace-pre-line">
-              {message.text}
-            </p>
+            <RichText text={message.text} className="text-sm sm:text-base text-slate-800 leading-relaxed space-y-1" />
           )}
 
           {/* Grounding Web Sources / Citations */}

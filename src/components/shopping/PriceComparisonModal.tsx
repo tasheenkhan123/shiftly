@@ -33,8 +33,9 @@ export const PriceComparisonModal: React.FC<PriceComparisonModalProps> = ({
   const rate = currency === 'USD' ? 0.012 : 1;
   const symbol = currency === 'USD' ? '$' : '₹';
 
-  const lowestPrice = product.merchants.reduce((min, m) => (m.price < min ? m.price : min), Infinity);
-  const highestPrice = product.merchants.reduce((max, m) => (m.price > max ? m.price : max), -Infinity);
+  const known = product.merchants.filter(m => m.priceKnown !== false && m.price > 0);
+  const lowestPrice = known.reduce((min, m) => (m.price < min ? m.price : min), Infinity);
+  const highestPrice = known.reduce((max, m) => (m.price > max ? m.price : max), -Infinity);
   const potentialSavings = highestPrice > lowestPrice ? Math.round((highestPrice - lowestPrice) * rate) : 0;
 
   return (
@@ -80,7 +81,7 @@ export const PriceComparisonModal: React.FC<PriceComparisonModalProps> = ({
           <div className="px-5 py-2.5 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between text-xs">
             <span className="flex items-center gap-1.5 text-emerald-800 font-medium">
               <TrendingDown className="w-4 h-4 text-emerald-600" />
-              Save up to <strong className="text-emerald-950 font-bold">{symbol}{potentialSavings.toLocaleString()}</strong> across verified sellers!
+              Save up to <strong className="text-emerald-950 font-bold">{symbol}{potentialSavings.toLocaleString()}</strong> by picking the cheapest store
             </span>
             <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-100 px-2 py-0.5 rounded">Lowest Price Found</span>
           </div>
@@ -89,7 +90,8 @@ export const PriceComparisonModal: React.FC<PriceComparisonModalProps> = ({
         {/* Merchants List */}
         <div className="p-5 overflow-y-auto space-y-3">
           {product.merchants.map((merchant) => {
-            const isLowest = merchant.price === lowestPrice;
+            const merchantPriceKnown = merchant.priceKnown !== false && merchant.price > 0;
+            const isLowest = merchantPriceKnown && merchant.price === lowestPrice;
             const convertedPrice = Math.round(merchant.price * rate);
             const convertedOriginal = merchant.originalPrice ? Math.round(merchant.originalPrice * rate) : null;
             const urlCheck = validateExternalUrl(merchant.productUrl);
@@ -142,20 +144,41 @@ export const PriceComparisonModal: React.FC<PriceComparisonModalProps> = ({
                       ) : null}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
-                      {merchant.verified && merchant.inStock ? (
+                      {merchant.availability === 'AVAILABLE' ? (
                         <span className="flex items-center gap-1 text-emerald-600 text-[10px]">
-                          <CheckCircle2 className="w-3 h-3" /> In Stock
+                          <CheckCircle2 className="w-3 h-3" /> In stock
+                        </span>
+                      ) : merchant.availability === 'OUT_OF_STOCK' ? (
+                        <span className="flex items-center gap-1 text-red-600 text-[10px]">
+                          <AlertCircle className="w-3 h-3" /> Out of stock
                         </span>
                       ) : (
                         <span className="flex items-center gap-1 text-slate-500 text-[10px]">
-                          Check Store
+                          Stock not confirmed
                         </span>
                       )}
-                      <span>•</span>
-                      <span className="text-[10px] flex items-center gap-1 text-slate-400">
-                        <Clock className="w-3 h-3" /> {merchant.deliveryEstimate || 'Standard delivery'}
-                      </span>
+                      {merchant.shipping && (
+                        <>
+                          <span>•</span>
+                          <span className="text-[10px] flex items-center gap-1 text-slate-400">
+                            <Clock className="w-3 h-3" /> {merchant.shipping}
+                          </span>
+                        </>
+                      )}
                     </div>
+                    {(merchant.discountLabel || merchant.tag || (merchant.offers && merchant.offers.length > 0)) && (
+                      <div className="flex flex-wrap gap-1 mt-1.5 max-w-xs">
+                        {merchant.tag && (
+                          <span className="px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[9px] font-semibold text-blue-700">{merchant.tag}</span>
+                        )}
+                        {merchant.discountLabel && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-[9px] font-semibold text-emerald-700">{merchant.discountLabel}</span>
+                        )}
+                        {(merchant.offers || []).slice(0, 4).map((o, i) => (
+                          <span key={i} className="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-[9px] font-medium text-amber-800">{o}</span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -163,14 +186,18 @@ export const PriceComparisonModal: React.FC<PriceComparisonModalProps> = ({
                 <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
                   <div className="text-left sm:text-right">
                     <div className="flex items-baseline gap-1.5">
-                      <span className="text-base font-extrabold text-slate-900">{symbol}{convertedPrice.toLocaleString()}</span>
-                      {convertedOriginal && (
+                      {merchantPriceKnown ? (
+                        <span className="text-base font-extrabold text-slate-900">{symbol}{convertedPrice.toLocaleString()}</span>
+                      ) : (
+                        <span className="text-xs font-semibold text-slate-500">Check price</span>
+                      )}
+                      {convertedOriginal && merchantPriceKnown && (
                         <span className="text-xs text-slate-400 line-through">
                           {symbol}{convertedOriginal.toLocaleString()}
                         </span>
                       )}
                     </div>
-                    <span className="text-[9px] text-slate-400 block">Verified {merchant.verifiedAt}</span>
+                    <span className="text-[9px] text-slate-400 block">{merchant.source === 'Google Shopping' ? `Checked ${merchant.verifiedAt}` : merchant.verifiedAt}</span>
                   </div>
 
                   {isAvailable && urlCheck.sanitizedUrl ? (
@@ -212,7 +239,7 @@ export const PriceComparisonModal: React.FC<PriceComparisonModalProps> = ({
 
         {/* Modal Footer */}
         <div className="p-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-500">
-          <span className="text-[10px]">Direct external browser navigation • No iframes or proxies</span>
+          <span className="text-[10px]">Prices and offers can change. Confirm on the store before paying.</span>
           <button
             onClick={onClose}
             className="px-3.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-medium"
