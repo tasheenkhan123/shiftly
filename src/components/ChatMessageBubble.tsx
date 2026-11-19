@@ -11,9 +11,9 @@ import {
 } from 'lucide-react';
 import { ChatMessage, ProductMatch } from '@/types';
 import { ProductCard } from '@/components/shopping/ProductCard';
-import { RecipeView } from '@/components/recipe/RecipeView';
 import { validateExternalUrl, SAFE_EXTERNAL_LINK_PROPS } from '@/lib/security/urlValidator';
 import { RichText } from '@/components/RichText';
+import { productKey } from '@/lib/store/userData';
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
@@ -62,7 +62,6 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   }
 
   // 2. Assistant Response (Clean White Box with Verified Google Shopping & Product Cards)
-  const googleShoppingCheck = validateExternalUrl(message.googleShoppingUrl);
   const configurationNotice = message.configurationNotice || message.analysisResult?.configurationNotice;
   const isGroundingActive = message.isGroundingActive || message.analysisResult?.isGroundingActive;
   const groundingSources = message.groundingSources || message.analysisResult?.groundingSources || [];
@@ -146,42 +145,9 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             </div>
           )}
 
-          {/* Google Shopping & Direct Web Source Actions */}
-          {googleShoppingCheck.isValid && googleShoppingCheck.sanitizedUrl && (
-            <div className="p-3.5 bg-blue-50/70 border border-blue-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-white border border-blue-200 flex items-center justify-center text-blue-600 shrink-0 shadow-xs">
-                  <Search className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900">Real Google Shopping Index</h4>
-                  <p className="text-[11px] text-slate-500">Live verified search for this product across all web stores</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <a
-                  href={googleShoppingCheck.sanitizedUrl}
-                  {...SAFE_EXTERNAL_LINK_PROPS}
-                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all active:scale-[0.98]"
-                >
-                  <span>Open Google Shopping</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              </div>
-            </div>
-          )}
-
-          {/* If Recipe Intent */}
-          {message.analysisResult?.intent === 'RECIPE' && message.analysisResult.recipeData && (
-            <RecipeView
-              recipe={message.analysisResult.recipeData}
-              currency={currency}
-            />
-          )}
 
           {/* If Shopping Intent: Render Matching Products */}
-          {message.analysisResult && message.analysisResult.intent !== 'RECIPE' && Object.values(message.analysisResult.productMatches || {}).flat().length > 0 && (
+          {message.analysisResult && Object.values(message.analysisResult.productMatches || {}).flat().length > 0 && (
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-slate-200 pb-3">
                 <div className="flex items-center gap-2">
@@ -220,7 +186,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
                               key={product.id}
                               product={product}
                               currency={currency}
-                              isSaved={savedProductIds.has(product.id)}
+                              isSaved={savedProductIds.has(productKey(product))}
                               onToggleSave={onToggleSave}
                               onOpenPriceComparison={onOpenPriceComparison}
                             />
@@ -237,7 +203,7 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
                       key={product.id}
                       product={product}
                       currency={currency}
-                      isSaved={savedProductIds.has(product.id)}
+                      isSaved={savedProductIds.has(productKey(product))}
                       onToggleSave={onToggleSave}
                       onOpenPriceComparison={onOpenPriceComparison}
                     />

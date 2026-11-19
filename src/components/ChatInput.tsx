@@ -1,266 +1,168 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Plus, 
-  Image as ImageIcon, 
-  Link as LinkIcon, 
-  FileText, 
-  ArrowUp, 
-  X, 
-  Loader2, 
-  Search,
-  CheckCircle2,
-  Paperclip
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowUp, ImagePlus, Loader2, X } from 'lucide-react';
+import { downscaleImage } from '@/lib/image';
 
 interface ChatInputProps {
-  onSend: (text: string, mediaUrl?: string, mediaType?: 'image' | 'video' | 'link' | 'file') => void;
+  /** imageDataUrl is a downscaled JPEG data URL when the user attached a screenshot/photo */
+  onSend: (text: string, imageDataUrl?: string) => void;
   isLoading: boolean;
 }
 
+const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
 export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading }) => {
   const [text, setText] = useState('');
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [attachedImage, setAttachedImage] = useState<string | null>(null);
-  const [attachedLink, setAttachedLink] = useState<string | null>(null);
-  const [linkInputPrompt, setLinkInputPrompt] = useState(false);
-  const [linkInputValue, setLinkInputValue] = useState('');
-
+  const [image, setImage] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const docInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Auto-resize textarea
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
-    }
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }, [text]);
 
-  // Click outside to close plus menu
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setIsMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setAttachedImage(event.target?.result as string);
-        setIsMenuOpen(false);
-      };
-      reader.readAsDataURL(file);
+  const attach = async (file: File | null | undefined) => {
+    if (!file) return;
+    setError(null);
+    if (!file.type.startsWith('image/')) {
+      setError('Please attach an image (screenshot or photo).');
+      return;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      setError('That image is over 15 MB. Please use a smaller one.');
+      return;
+    }
+    setProcessing(true);
+    try {
+      setImage(await downscaleImage(file));
+      textareaRef.current?.focus();
+    } catch (err: any) {
+      setError(err?.message || 'Could not read that image.');
+    } finally {
+      setProcessing(false);
     }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
-    const items = e.clipboardData.items;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        const file = items[i].getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            setAttachedImage(event.target?.result as string);
-          };
-          reader.readAsDataURL(file);
-          break;
-        }
-      }
+    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
+    if (item) {
+      e.preventDefault();
+      attach(item.getAsFile());
     }
   };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    attach(e.dataTransfer.files?.[0]);
+  };
+
+  const canSend = !isLoading && !processing && (text.trim().length > 0 || Boolean(image));
 
   const handleSubmit = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!text.trim() && !attachedImage && !attachedLink) return;
-
-    let mediaUrl = attachedImage || attachedLink || undefined;
-    let mediaType: 'image' | 'video' | 'link' | 'file' | undefined = undefined;
-    if (attachedImage) mediaType = 'image';
-    else if (attachedLink) mediaType = 'link';
-
-    onSend(text.trim(), mediaUrl, mediaType);
+    e?.preventDefault();
+    if (!canSend) return;
+    onSend(text.trim(), image || undefined);
     setText('');
-    setAttachedImage(null);
-    setAttachedLink(null);
-    setIsMenuOpen(false);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
-
-  const handleAddLink = () => {
-    if (linkInputValue.trim()) {
-      setAttachedLink(linkInputValue.trim());
-      setLinkInputValue('');
-      setLinkInputPrompt(false);
-      setIsMenuOpen(false);
-    }
+    setImage(null);
+    setError(null);
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 pb-4 sm:pb-6 relative">
-      {/* Hidden file inputs */}
+    <div className="w-full max-w-3xl mx-auto px-4 pb-4 sm:pb-6">
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={handleFileSelect}
-      />
-      <input
-        ref={docInputRef}
-        type="file"
-        accept=".pdf,.txt,.doc,.docx"
-        className="hidden"
-        onChange={handleFileSelect}
+        onChange={e => {
+          attach(e.target.files?.[0]);
+          e.target.value = '';
+        }}
       />
 
-      {/* Attached Media Previews */}
-      {(attachedImage || attachedLink) && (
-        <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-2xl max-w-fit shadow-sm">
-          {attachedImage && (
-            <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-slate-300">
-              <img src={attachedImage} alt="Uploaded screenshot" className="w-full h-full object-cover" />
-            </div>
-          )}
-          <div className="flex flex-col text-xs">
-            <span className="font-semibold text-slate-800 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
-              {attachedImage ? 'Screenshot / Photo Attached' : 'Link Attached'}
-            </span>
-            <span className="text-[11px] text-slate-500 max-w-[200px] truncate">
-              {attachedImage ? 'Visual search active' : attachedLink}
-            </span>
-          </div>
-          <button
-            onClick={() => {
-              setAttachedImage(null);
-              setAttachedLink(null);
-            }}
-            className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-full transition-all ml-2"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Main Chat Input Container */}
-      <div 
-        onPaste={handlePaste}
-        className="relative flex items-end gap-2 bg-white border border-slate-300 hover:border-slate-400 focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-100 rounded-2xl p-2 sm:p-2.5 shadow-md shadow-slate-200/50 transition-all"
+      <form
+        onSubmit={handleSubmit}
+        onDragOver={e => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        className={`rounded-2xl border bg-white shadow-sm transition-all ${
+          dragging ? 'border-blue-500 ring-4 ring-blue-100' : 'border-slate-200 focus-within:border-slate-300 focus-within:shadow-md'
+        }`}
       >
-        {/* Plus (+) Menu Trigger */}
-        <div className="relative shrink-0" ref={menuRef}>
-          <button
-            type="button"
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
-              isMenuOpen ? 'bg-slate-900 text-white rotate-45' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-            title="Attach image or link"
-          >
-            <Plus className="w-5 h-5 transition-transform" />
-          </button>
-
-          {/* Plus Menu Popover */}
-          {isMenuOpen && (
-            <div className="absolute bottom-12 left-0 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 z-50 animate-fade-in space-y-1">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-xl transition-colors text-left"
-              >
-                <ImageIcon className="w-4 h-4 text-blue-600" />
-                <span>Upload Screenshot / Image</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setLinkInputPrompt(true)}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-xl transition-colors text-left"
-              >
-                <LinkIcon className="w-4 h-4 text-pink-600" />
-                <span>Paste Instagram / Video Link</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => docInputRef.current?.click()}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-xl transition-colors text-left"
-              >
-                <FileText className="w-4 h-4 text-amber-600" />
-                <span>Upload Document / File</span>
-              </button>
-
-              {linkInputPrompt && (
-                <div className="p-2 border-t border-slate-100 pt-2">
-                  <input
-                    type="url"
-                    placeholder="https://..."
-                    value={linkInputValue}
-                    onChange={(e) => setLinkInputValue(e.target.value)}
-                    className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-600 mb-1.5"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddLink}
-                    className="w-full py-1 bg-blue-600 text-white rounded-lg text-xs font-semibold"
-                  >
-                    Attach Link
-                  </button>
+        {(image || processing) && (
+          <div className="px-3 pt-3">
+            <div className="relative inline-block">
+              {image ? (
+                <img src={image} alt="Attached" className="h-16 w-16 rounded-xl object-cover border border-slate-200" />
+              ) : (
+                <div className="h-16 w-16 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center">
+                  <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
                 </div>
               )}
+              {image && (
+                <button
+                  type="button"
+                  onClick={() => setImage(null)}
+                  className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-slate-900 text-white shadow"
+                  aria-label="Remove image"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
             </div>
-          )}
+          </div>
+        )}
+
+        <div className="flex items-end gap-2 p-2">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="shrink-0 p-2.5 rounded-xl text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+            title="Attach a screenshot or photo"
+            aria-label="Attach image"
+          >
+            <ImagePlus className="w-5 h-5" />
+          </button>
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onPaste={handlePaste}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+            placeholder={image ? 'Add details (optional), e.g. "under ₹2,000" or "cheaper alternatives"' : 'What are you shopping for? e.g. "face wash for oily skin under ₹500"'}
+            className="flex-1 bg-transparent resize-none text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none leading-relaxed py-2 max-h-36"
+          />
+          <button
+            type="submit"
+            disabled={!canSend}
+            className="shrink-0 p-2.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 transition-colors"
+            aria-label="Search"
+          >
+            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowUp className="w-5 h-5" />}
+          </button>
         </div>
+      </form>
 
-        {/* Textarea */}
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Message Siftly, paste any screenshot or link..."
-          className="w-full bg-transparent border-0 resize-none text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:ring-0 leading-relaxed py-1.5 max-h-36"
-        />
-
-        {/* Find Action Button */}
-        <button
-          type="button"
-          onClick={() => handleSubmit()}
-          disabled={isLoading || (!text.trim() && !attachedImage && !attachedLink)}
-          className="shrink-0 flex items-center justify-center gap-1 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white disabled:text-slate-400 font-bold text-xs shadow-sm transition-all active:scale-95"
-        >
-          {isLoading ? (
-            <Loader2 className="w-4 h-4 animate-spin text-white" />
-          ) : (
-            <>
-              <span>Find</span>
-              <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
-            </>
-          )}
-        </button>
-      </div>
-
-      <div className="text-center mt-1.5 text-[11px] text-slate-400">
-        Drop any screenshot from Google or social media to find exact products and verified prices.
-      </div>
+      <p className="mt-2 text-center text-[11px] text-slate-400">
+        {error ? <span className="text-red-600">{error}</span> : 'Paste or drop a screenshot to find that exact product. Prices come from Google Shopping and can change.'}
+      </p>
     </div>
   );
 };

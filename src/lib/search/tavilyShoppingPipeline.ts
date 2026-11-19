@@ -7,8 +7,11 @@ import {
   GroundingSource,
   MatchTier
 } from '@/types';
-import { extractBrand } from '../ai/pipeline';
-import { callGeminiJson } from '../ai/gemini';
+import { extractBrand } from '../ai/constraints';
+import { callGeminiJson, imagePartFromDataUrl } from '../ai/gemini';
+import type { SearchProgressEvent } from '@/types';
+
+export type ProgressFn = (stage: SearchProgressEvent['stage'], message: string) => void;
 import { findProductsOnGoogleShopping, isGoogleShoppingConfigured } from './googleShoppingProvider';
 
 export interface ConversationTurn {
@@ -40,6 +43,8 @@ export interface ParsedShoppingIntent {
   clarificationQuestion?: string | null;
   appliedPreferences: string[];
   excludedProductTitles?: string[];
+  /** What Gemini saw in the uploaded screenshot, if any */
+  imageDescription?: string | null;
 }
 
 export interface ExtractedProductCandidate {
@@ -429,8 +434,10 @@ export async function understandShoppingQuery(
   rawInput: string,
   geminiApiKey: string,
   constraints?: UserConstraints,
-  conversationHistory?: ConversationTurn[]
+  conversationHistory?: ConversationTurn[],
+  imageDataUrl?: string
 ): Promise<ParsedShoppingIntent> {
+  const image = imagePartFromDataUrl(imageDataUrl);
   // Format conversational context
   let historyText = '';
   if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
@@ -452,7 +459,15 @@ export async function understandShoppingQuery(
 Your goal is to understand what the customer ACTUALLY wants to accomplish, taking into account their intent, context, purpose, constraints, preferences, and implied requirements.
 
 User Query: "${rawInput}"
-
+${image ? `
+AN IMAGE IS ATTACHED (a screenshot or photo from the customer). Look at it carefully:
+- Identify the main product shown: brand (read any logo or label text), exact product name/model, product type, colour, size/variant.
+- Unless the customer asks for something else (e.g. "cheaper alternatives", "similar"), they want to buy THIS product: set cleanTarget and shoppingQuery to find this exact product (brand + product name + key variant).
+- If it is a screenshot of a product page or social post, use the product name/price text visible in it.
+- If no brand is visible, describe the product precisely (type, colour, material, style) so similar items can be found.
+- Put a one-sentence description of what you see in "imageDescription".
+- Set needsClarification to false unless the image shows no product at all.
+` : ''}
 Recent Conversation History:
 ${historyText || "None (New conversation)"}
 
@@ -500,7 +515,7 @@ Output strictly valid JSON matching this schema:
   ],
   "cleanTarget": "clean target item or setup name",
   "searchQuery": "main search query if not bundle",
-  "shoppingQuery": "Short Google Shopping query, 2-6 words: product type plus key attributes and preferences (e.g. 'salicylic acid face wash oily skin'). No store names, no budget, no words like best/buy/under.",
+  "shoppingQuery": "Short Google Shopping query, 2-6 words: product type plus ONLY the attributes/preferences the customer actually stated (e.g. 'salicylic acid face wash oily skin'). Never add features they did not ask for. No store names, no budget, no words like best/buy/under.",
   "category": "Skincare" | "Computers & Electronics" | "Fashion" | "Bags" | "Gaming Setup" | "Home & Lifestyle" | "Other",
   "budgetMax": number in INR or null,
   "totalBudget": number in INR or null,
@@ -510,10 +525,11 @@ Output strictly valid JSON matching this schema:
   "needsClarification": boolean,
   "clarificationQuestion": string or null,
   "appliedPreferences": ["preference1", "preference2"],
-  "excludedProductTitles": ["title1", "title2"]
+  "excludedProductTitles": ["title1", "title2"],
+  "imageDescription": "what the attached image shows, or null if no image"
 }`;
 
-  const parsed = await callGeminiJson<any>(prompt, geminiApiKey, { label: 'intent', timeoutMs: 8000, totalTimeoutMs: 14000 });
+  const parsed = await callGeminiJson<any>(prompt, geminiApiKey, { label: 'intent', hedgeAfterMs: image ? 6000 : 4000, totalTimeoutMs: 16000, image });
   if (parsed && typeof parsed === 'object') {
     const cleanTarget = parsed.cleanTarget || rawInput.replace(/find|three|best|the|buy|under|\d+|₹/gi, '').trim() || 'product';
 
@@ -539,7 +555,8 @@ Output strictly valid JSON matching this schema:
       needsClarification: Boolean(parsed.needsClarification),
       clarificationQuestion: parsed.clarificationQuestion || null,
       appliedPreferences: Array.isArray(parsed.appliedPreferences) ? parsed.appliedPreferences : [],
-      excludedProductTitles: Array.isArray(parsed.excludedProductTitles) ? parsed.excludedProductTitles : []
+      excludedProductTitles: Array.isArray(parsed.excludedProductTitles) ? parsed.excludedProductTitles : [],
+      imageDescription: typeof parsed.imageDescription === 'string' ? parsed.imageDescription : null
     };
   }
 
@@ -1169,7 +1186,8 @@ export async function searchProductsWithTavilyAndGemini(
   rawInput: string,
   imagePreviewUrl?: string,
   constraints?: UserConstraints,
-  conversationHistory?: ConversationTurn[]
+  conversationHistory?: ConversationTurn[],
+  onProgress: ProgressFn = () => {}
 ): Promise<{
   result: SiftlyAnalysisResult;
   assistantSummary: string;
@@ -1201,7 +1219,11 @@ export async function searchProductsWithTavilyAndGemini(
 
   try {
     // 1. Understand Query with Gemini (Dynamic target, setup detection, budget allocation, follow-up memory)
-    const parsedIntent = await understandShoppingQuery(rawInput, geminiApiKey, constraints, conversationHistory);
+    onProgress(imagePreviewUrl ? 'reading_image' : 'understanding', imagePreviewUrl ? 'Looking at your image…' : 'Understanding what you need…');
+    const parsedIntent = await understandShoppingQuery(rawInput, geminiApiKey, constraints, conversationHistory, imagePreviewUrl);
+    if (imagePreviewUrl && !parsedIntent.imageDescription) {
+      console.warn('[intent] image attached but Gemini returned no image description');
+    }
 
     // If clarification is genuinely essential (missing all context/category), ask at most ONE question immediately
     if (parsedIntent.needsClarification && parsedIntent.clarificationQuestion) {
@@ -1220,12 +1242,14 @@ export async function searchProductsWithTavilyAndGemini(
     // ==========================================
     if (isGoogleShoppingConfigured()) {
       try {
-        const gs = await runGoogleShoppingFlow(rawInput, parsedIntent, geminiApiKey, startTime, imagePreviewUrl, constraints);
+        const gs = await runGoogleShoppingFlow(rawInput, parsedIntent, geminiApiKey, startTime, imagePreviewUrl, constraints, onProgress);
         if (gs) return gs;
       } catch (err: any) {
         console.error('[google-shopping] failed, falling back to Tavily web search:', err?.message);
       }
     }
+
+    onProgress('searching', 'Searching the web for products…');
 
     // ==========================================
     // CASE A: COMPLETE SETUP / BUNDLE REQUEST
@@ -1519,9 +1543,11 @@ async function runGoogleShoppingFlow(
   geminiApiKey: string,
   startTime: number,
   imagePreviewUrl?: string,
-  constraints?: UserConstraints
+  constraints?: UserConstraints,
+  onProgress: ProgressFn = () => {}
 ): Promise<{ result: SiftlyAnalysisResult; assistantSummary: string; isGroundingActive: boolean } | null> {
   const base = {
+    onProgress,
     userRequest: rawInput,
     preferences: [...(parsedIntent.appliedPreferences || []), ...(parsedIntent.priorities || [])],
     excludeTitles: parsedIntent.excludedProductTitles || [],
@@ -1557,12 +1583,14 @@ async function runGoogleShoppingFlow(
   // ---- Setup / bundle ----
   if (parsedIntent.isBundleOrSetup && parsedIntent.bundleComponents && parsedIntent.bundleComponents.length > 0) {
     const comps = parsedIntent.bundleComponents.slice(0, 5);
+    onProgress('searching', `Searching Google Shopping for ${comps.length} parts: ${comps.map(c => c.componentName).join(', ')}…`);
     const results = await Promise.allSettled(
       comps.map(async (comp, i) => {
         const id = `entity_comp_${i}_${Date.now()}`;
         const q = (comp.shoppingQuery && comp.shoppingQuery.trim()) || comp.componentName;
         const { matches } = await findProductsOnGoogleShopping({
           ...base,
+          onProgress: undefined, // one combined progress message for setups instead of one per part
           shoppingQuery: q,
           target: comp.componentName,
           budgetMax: comp.allocatedBudget || null,
@@ -1597,6 +1625,7 @@ async function runGoogleShoppingFlow(
   // ---- Single product ----
   const entityId = `entity_${Date.now()}`;
   const count = parsedIntent.requestedCount || 3;
+  onProgress('searching', `Searching Google Shopping for ${parsedIntent.shoppingQuery || parsedIntent.cleanTarget}…`);
   const { matches, listingsFound } = await findProductsOnGoogleShopping({
     ...base,
     shoppingQuery: parsedIntent.shoppingQuery || parsedIntent.cleanTarget,
@@ -1625,7 +1654,8 @@ async function runGoogleShoppingFlow(
     return `${i + 1}. **${m.title}**: ${price}${stores}${m.whyPicked ? `. ${m.whyPicked}` : ''}`;
   });
   const prefs = parsedIntent.appliedPreferences?.length ? ` (${parsedIntent.appliedPreferences.join(', ')})` : '';
-  const summary = `Here are the top ${matches.length} **${parsedIntent.cleanTarget}**${budgetStr}${prefs}:\n\n${lines.join('\n')}\n\nOpen **Compare stores** on any product to see every store's price and offers.`;
+  const seen = parsedIntent.imageDescription ? `In your image I can see: ${parsedIntent.imageDescription}\n\n` : '';
+  const summary = `${seen}Here are the top ${matches.length} **${parsedIntent.cleanTarget}**${budgetStr}${prefs}:\n\n${lines.join('\n')}\n\nOpen **Compare stores** on any product to see every store's price and offers.`;
 
   return {
     result: resultBase([makeEntity(entityId, parsedIntent.cleanTarget, parsedIntent.shoppingQuery)], { [entityId]: matches }, [parsedIntent.shoppingQuery]),

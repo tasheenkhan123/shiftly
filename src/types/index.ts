@@ -1,10 +1,9 @@
-export type IntentType = 'SHOPPING' | 'RECIPE' | 'UNKNOWN';
+export type IntentType = 'SHOPPING' | 'UNKNOWN';
 
 export type InputCategory = 
   | 'FASHION' 
   | 'BAGS' 
   | 'SKINCARE' 
-  | 'RECIPE' 
   | 'MIXED'
   | 'COMPUTERS_ELECTRONICS'
   | 'GAMING_SETUPS'
@@ -116,47 +115,6 @@ export interface ProductMatch {
   dataSource?: string;
 }
 
-export interface RecipeIngredient {
-  id: string;
-  name: string;
-  quantity: string;
-  unit: string;
-  isRequired: boolean;
-  category: 'Produce' | 'Pantry' | 'Dairy & Refrigerated' | 'Meat & Seafood' | 'Spices & Seasoning' | 'Other';
-  estimatedCostInr?: number;
-  notes?: string;
-}
-
-export interface IngredientSubstitution {
-  originalIngredientId?: string;
-  originalName: string;
-  substituteName: string;
-  ratioNotes: string;
-  flavorImpact: string;
-  costImpact: 'Much Cheaper' | 'Slightly Cheaper' | 'Equal' | 'More Expensive';
-  estimatedSavingsPercentage?: number;
-  preparationTip?: string;
-}
-
-export interface RecipeData {
-  id: string;
-  dishName: string;
-  origin?: string;
-  prepTimeMinutes: number;
-  cookTimeMinutes: number;
-  servings: number;
-  difficulty: 'Easy' | 'Medium' | 'Advanced';
-  summaryDescription: string;
-  ingredients: RecipeIngredient[];
-  substitutions: IngredientSubstitution[];
-  instructions: string[];
-  estimatedTotalCostInr: number;
-  estimatedOptimizedCostInr: number;
-  dietaryTags: string[];
-  sourceMediaUrl?: string;
-  thumbnailUrl?: string;
-}
-
 export interface UserConstraints {
   budgetMax?: number;
   budgetMin?: number;
@@ -190,7 +148,6 @@ export interface SiftlyAnalysisResult {
   userConstraints: UserConstraints;
   detectedEntities: DetectedEntity[];
   productMatches: Record<string, ProductMatch[]>; // entityId -> matches
-  recipeData?: RecipeData;
   warnings?: string[];
   executionTimeMs: number;
   isGroundingActive?: boolean;
@@ -230,7 +187,15 @@ export interface ChatSession {
   title: string;
   createdAt: string;
   updatedAt: string;
+  pinned?: boolean;
   messages: ChatMessage[];
+}
+
+/** Live progress events streamed from /api/analyze while a search runs */
+export interface SearchProgressEvent {
+  type: 'progress';
+  stage: 'understanding' | 'reading_image' | 'searching' | 'choosing' | 'comparing' | 'done';
+  message: string;
 }
 
 export interface UserProfile {

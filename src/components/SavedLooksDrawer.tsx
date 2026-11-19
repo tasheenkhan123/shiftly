@@ -54,7 +54,7 @@ export const SavedLooksDrawer: React.FC<SavedLooksDrawerProps> = ({
               <ShoppingBag className="w-12 h-12 text-slate-600 mx-auto" />
               <p className="text-sm">No saved items yet.</p>
               <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                Click the bookmark icon on any product card or recipe to save it here for later.
+                Click the bookmark icon on any product card to save it here for later.
               </p>
             </div>
           ) : (

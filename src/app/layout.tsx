@@ -3,8 +3,8 @@ import { Analytics } from '@vercel/analytics/next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Siftly — Visual Product & Recipe Search Assistant',
-  description: 'Upload any screenshot, photo, or link. Siftly finds the real product and compares trusted store prices.',
+  title: 'Siftly — Smart Shopping Assistant',
+  description: 'Describe what you need or paste a product screenshot. Siftly finds the best options and compares prices and offers across Indian stores.',
 };
 
 export const viewport = {

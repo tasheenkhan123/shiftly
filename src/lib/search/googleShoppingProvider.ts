@@ -13,6 +13,21 @@
 import { MatchTier, MerchantOffer, ProductMatch } from '@/types';
 import { callGeminiJson } from '@/lib/ai/gemini';
 
+// ---------------------------------------------------------------------------
+// Small in-memory cache: repeat searches are instant and don't spend SerpApi credits.
+// (Per server instance; on Vercel each warm instance keeps its own copy.)
+// ---------------------------------------------------------------------------
+const CACHE_TTL_MS = 30 * 60 * 1000;
+const cache = new Map<string, { at: number; value: unknown }>();
+async function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value as T;
+  const value = await fn();
+  cache.set(key, { at: Date.now(), value });
+  if (cache.size > 300) cache.delete(cache.keys().next().value as string);
+  return value;
+}
+
 const SERPAPI_ENDPOINT = 'https://serpapi.com/search.json';
 
 export interface ShoppingListing {
@@ -112,7 +127,7 @@ export async function searchGoogleShopping(
   // obscure sellers (tested: 2 results vs 40). We filter by budget ourselves instead.
   void opts;
 
-  const data = await serpApiGet(params);
+  const data = await cached(`shop:${query.toLowerCase().trim()}`, () => serpApiGet(params));
   const raw: any[] = Array.isArray(data?.shopping_results) ? data.shopping_results : [];
 
   return raw
@@ -137,7 +152,9 @@ export async function searchGoogleShopping(
 
 /** All stores selling one product, with each store's price and offer text. */
 export async function getProductStores(pageToken: string): Promise<ProductStoresResult> {
-  const data = await serpApiGet({ engine: 'google_immersive_product', page_token: pageToken, more_stores: 'true' });
+  const data = await cached(`stores:${pageToken}`, () =>
+    serpApiGet({ engine: 'google_immersive_product', page_token: pageToken, more_stores: 'true' })
+  );
   const pr = data?.product_results || {};
   const stores: StoreListing[] = (Array.isArray(pr.stores) ? pr.stores : [])
     .filter((s: any) => str(s?.name) && str(s?.link))
@@ -237,7 +254,7 @@ ${lines}
 
 Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one short sentence on why it suits this customer (brand reputation, rating, key feature). Do NOT mention any price or store name, because prices are shown separately and differ per store."}]}`;
 
-  const parsed = await callGeminiJson<{ picks?: Pick[] }>(prompt, geminiKey, { label: 'shopping-pick' });
+  const parsed = await callGeminiJson<{ picks?: Pick[] }>(prompt, geminiKey, { label: 'shopping-pick', totalTimeoutMs: 14000 });
   // Gemini returns either {"picks":[...]} or a bare [...] array
   const rawPicks: any[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.picks) ? parsed!.picks : [];
   const unique: Pick[] = [];
@@ -339,6 +356,7 @@ export interface GoogleShoppingSearchParams {
   /** How many of the picks get a full multi-store lookup (each costs one SerpApi search) */
   storeLookups: number;
   geminiKey: string;
+  onProgress?: (stage: 'choosing' | 'comparing', message: string) => void;
 }
 
 export async function findProductsOnGoogleShopping(
@@ -357,12 +375,14 @@ export async function findProductsOnGoogleShopping(
 
   if (eligible.length === 0) return { matches: [], listingsFound: listings.length };
 
+  p.onProgress?.('choosing', `Found ${eligible.length} listings. Choosing the best ${p.count}…`);
   const picks = await pickBestListings(
     eligible,
     { userRequest: p.userRequest, target: p.target, budgetMax: p.budgetMax, count: p.count, preferences: p.preferences },
     p.geminiKey
   );
 
+  p.onProgress?.('comparing', 'Comparing prices and offers across stores…');
   const checkedAt = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
 
   const matches = await Promise.all(

@@ -1,238 +1,253 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, Mail, Lock, User, Phone, Globe, MapPin, CheckCircle, ArrowRight, ShieldCheck } from 'lucide-react';
-import { UserProfile } from '@/types';
+import React, { useEffect, useState } from 'react';
+import { X, Loader2, Mail, Lock, User as UserIcon, CheckCircle2, AlertCircle } from 'lucide-react';
+import { getSupabase, isAuthConfigured, isGoogleSignInEnabled } from '@/lib/supabase/client';
+
+type Mode = 'signin' | 'signup' | 'forgot' | 'reset';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (user: UserProfile) => void;
+  /** Opens straight into "choose a new password" after the user clicks a reset link */
+  passwordRecovery?: boolean;
+  onPasswordRecoveryDone?: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({
-  isOpen,
-  onClose,
-  onSuccess
-}) => {
-  const [tab, setTab] = useState<'signin' | 'signup'>('signin');
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordRecovery, onPasswordRecoveryDone }) => {
+  const [mode, setMode] = useState<Mode>('signin');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [country, setCountry] = useState('India');
-  const [stateName, setStateName] = useState('Maharashtra');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    if (passwordRecovery) setMode('reset');
+  }, [passwordRecovery]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
+  useEffect(() => {
+    setError(null);
+    setNotice(null);
+  }, [mode, isOpen]);
 
-    const user: UserProfile = {
-      id: `usr_${Date.now()}`,
-      fullName: tab === 'signup' && fullName ? fullName : email.split('@')[0],
-      email: email,
-      phone: tab === 'signup' ? phone : undefined,
-      country: tab === 'signup' ? country : 'India',
-      state: tab === 'signup' ? stateName : undefined,
-      isLoggedIn: true,
-    };
+  if (!isOpen && !passwordRecovery) return null;
 
-    localStorage.setItem('siftly_user', JSON.stringify(user));
-    onSuccess(user);
+  const sb = getSupabase();
+  const configured = isAuthConfigured() && sb;
+  const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+
+  const close = () => {
+    setPassword('');
+    if (mode === 'reset') onPasswordRecoveryDone?.();
     onClose();
   };
 
-  const handleGoogleLogin = () => {
-    const user: UserProfile = {
-      id: `usr_google_${Date.now()}`,
-      fullName: 'Google User',
-      email: 'user@gmail.com',
-      country: 'India',
-      isLoggedIn: true,
-    };
-    localStorage.setItem('siftly_user', JSON.stringify(user));
-    onSuccess(user);
-    onClose();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sb) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (mode === 'signin') {
+        const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
+        if (error) throw error;
+        close();
+      } else if (mode === 'signup') {
+        if (password.length < 8) throw new Error('Use at least 8 characters for your password.');
+        const { data, error } = await sb.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { full_name: name.trim() }, emailRedirectTo: redirectTo },
+        });
+        if (error) throw error;
+        if (data.session) close();
+        else setNotice('Check your email and click the confirmation link to finish creating your account.');
+      } else if (mode === 'forgot') {
+        const { error } = await sb.auth.resetPasswordForEmail(email.trim(), { redirectTo });
+        if (error) throw error;
+        setNotice('If an account exists for that email, a password reset link is on its way.');
+      } else if (mode === 'reset') {
+        if (password.length < 8) throw new Error('Use at least 8 characters for your password.');
+        const { error } = await sb.auth.updateUser({ password });
+        if (error) throw error;
+        setNotice('Password updated. You are signed in.');
+        setTimeout(close, 1200);
+      }
+    } catch (err: any) {
+      setError(friendlyError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleGoogle = async () => {
+    if (!sb) return;
+    setBusy(true);
+    const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
+    if (error) {
+      setError(friendlyError(error.message));
+      setBusy(false);
+    }
+  };
+
+  const titles: Record<Mode, string> = {
+    signin: 'Sign in to Siftly',
+    signup: 'Create your account',
+    forgot: 'Reset your password',
+    reset: 'Choose a new password',
+  };
+  const subtitles: Record<Mode, string> = {
+    signin: 'Your searches, pinned chats and saved items sync to your account.',
+    signup: 'Save products and keep your search history on every device.',
+    forgot: "Enter your email and we'll send you a reset link.",
+    reset: 'Enter a new password for your account.',
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in">
-      <div className="relative w-full max-w-md bg-white border border-slate-200 rounded-3xl shadow-2xl overflow-hidden p-6 sm:p-8">
-        {/* Close Button */}
+      <div className="relative w-full max-w-sm bg-white border border-slate-200 rounded-3xl shadow-2xl p-6">
         <button
-          onClick={onClose}
-          className="absolute top-5 right-5 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-all"
+          onClick={close}
+          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full"
+          aria-label="Close"
         >
-          <X className="w-5 h-5" />
+          <X className="w-4 h-4" />
         </button>
 
-        {/* Header Branding */}
-        <div className="text-center space-y-1.5 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white font-bold flex items-center justify-center mx-auto text-lg shadow-md">
-            S
-          </div>
-          <h2 className="text-xl font-bold text-slate-900">
-            {tab === 'signin' ? 'Welcome back to Siftly' : 'Create your Siftly Account'}
-          </h2>
-          <p className="text-xs text-slate-500">
-            {tab === 'signin' ? 'Access your saved searches and custom price alerts.' : 'Save searches, compare verified sellers, and track prices.'}
-          </p>
+        <div className="mb-5">
+          <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-sm mb-3">S</div>
+          <h2 className="text-lg font-bold text-slate-900">{titles[mode]}</h2>
+          <p className="text-xs text-slate-500 mt-1">{subtitles[mode]}</p>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex bg-slate-100 p-1 rounded-xl mb-6 text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => setTab('signin')}
-            className={`flex-1 py-2 rounded-lg transition-all ${
-              tab === 'signin' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('signup')}
-            className={`flex-1 py-2 rounded-lg transition-all ${
-              tab === 'signup' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Create Account
-          </button>
-        </div>
-
-        {/* One-click Google Login */}
-        <button
-          type="button"
-          onClick={handleGoogleLogin}
-          className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 shadow-sm transition-all mb-4"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-          </svg>
-          <span>Continue with Google</span>
-        </button>
-
-        <div className="relative my-4">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-slate-200" />
+        {!configured ? (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 leading-relaxed">
+            Accounts aren&apos;t set up yet. Add <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
+            <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> to <code className="font-mono">.env.local</code>,
+            then restart the app. Until then, your searches and saved items stay in this browser.
           </div>
-          <div className="relative flex justify-center text-[10px] uppercase">
-            <span className="bg-white px-2 text-slate-400 font-semibold">Or with email credentials</span>
-          </div>
-        </div>
+        ) : (
+          <>
+            {isGoogleSignInEnabled() && (mode === 'signin' || mode === 'signup') && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleGoogle}
+                  disabled={busy}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-sm font-semibold text-slate-800 disabled:opacity-60"
+                >
+                  <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
+                    <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z" />
+                    <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z" />
+                    <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z" />
+                    <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z" />
+                  </svg>
+                  Continue with Google
+                </button>
+                <div className="flex items-center gap-3 my-4 text-[11px] text-slate-400">
+                  <span className="h-px flex-1 bg-slate-200" /> or <span className="h-px flex-1 bg-slate-200" />
+                </div>
+              </>
+            )}
 
-        {/* Credentials Form */}
-        <form onSubmit={handleSubmit} className="space-y-3">
-          {tab === 'signup' && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
-              <div className="relative">
-                <User className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
+            <form onSubmit={handleSubmit} className="space-y-3">
+              {mode === 'signup' && (
+                <Field icon={<UserIcon className="w-4 h-4" />} type="text" placeholder="Your name" value={name} onChange={setName} autoComplete="name" />
+              )}
+              {mode !== 'reset' && (
+                <Field icon={<Mail className="w-4 h-4" />} type="email" placeholder="Email" value={email} onChange={setEmail} autoComplete="email" required />
+              )}
+              {mode !== 'forgot' && (
+                <Field
+                  icon={<Lock className="w-4 h-4" />}
+                  type="password"
+                  placeholder={mode === 'signin' ? 'Password' : 'New password (8+ characters)'}
+                  value={password}
+                  onChange={setPassword}
+                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
                   required
-                  placeholder="e.g. Priya Sharma"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
                 />
-              </div>
+              )}
+
+              {error && (
+                <p className="flex items-start gap-1.5 text-xs text-red-600">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+                </p>
+              )}
+              {notice && (
+                <p className="flex items-start gap-1.5 text-xs text-emerald-700">
+                  <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {notice}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold disabled:opacity-60"
+              >
+                {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+                {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Update password'}
+              </button>
+            </form>
+
+            <div className="mt-4 text-xs text-slate-500 text-center space-y-1.5">
+              {mode === 'signin' && (
+                <>
+                  <button className="text-blue-600 hover:underline" onClick={() => setMode('forgot')}>Forgot password?</button>
+                  <p>
+                    New to Siftly?{' '}
+                    <button className="text-blue-600 font-semibold hover:underline" onClick={() => setMode('signup')}>Create an account</button>
+                  </p>
+                </>
+              )}
+              {(mode === 'signup' || mode === 'forgot') && (
+                <p>
+                  Already have an account?{' '}
+                  <button className="text-blue-600 font-semibold hover:underline" onClick={() => setMode('signin')}>Sign in</button>
+                </p>
+              )}
             </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-              <input
-                type="email"
-                required
-                placeholder="name@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-              />
-            </div>
-          </div>
-
-          {tab === 'signup' && (
-            <>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Phone Number (Optional)</label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                  <input
-                    type="tel"
-                    placeholder="+91 98765 43210"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Country</label>
-                  <div className="relative">
-                    <Globe className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="India"
-                      value={country}
-                      onChange={(e) => setCountry(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">State</label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Maharashtra"
-                      value={stateName}
-                      onChange={(e) => setStateName(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
-                    />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          <button
-            type="submit"
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-1.5 mt-2"
-          >
-            <span>{tab === 'signin' ? 'Sign In' : 'Create Free Account'}</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </form>
+          </>
+        )}
       </div>
     </div>
   );
 };
+
+function Field(props: {
+  icon: React.ReactNode;
+  type: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete?: string;
+  required?: boolean;
+}) {
+  return (
+    <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-slate-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 bg-white">
+      <span className="text-slate-400">{props.icon}</span>
+      <input
+        type={props.type}
+        placeholder={props.placeholder}
+        value={props.value}
+        onChange={e => props.onChange(e.target.value)}
+        autoComplete={props.autoComplete}
+        required={props.required}
+        className="flex-1 bg-transparent outline-none text-sm text-slate-900 placeholder:text-slate-400"
+      />
+    </label>
+  );
+}
+
+function friendlyError(msg?: string): string {
+  if (!msg) return 'Something went wrong. Please try again.';
+  if (/invalid login credentials/i.test(msg)) return 'Wrong email or password.';
+  if (/email not confirmed/i.test(msg)) return 'Please confirm your email first. Check your inbox for the link.';
+  if (/already registered|already exists/i.test(msg)) return 'An account with this email already exists. Try signing in.';
+  if (/rate limit/i.test(msg)) return 'Too many attempts. Please wait a minute and try again.';
+  if (/provider is not enabled/i.test(msg)) return 'Google sign-in is not enabled for this project yet.';
+  return msg;
+}
