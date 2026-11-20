@@ -23,6 +23,18 @@ export interface PreferenceField {
    * Per-search details (occasion, use, who it's for) are never auto-remembered: "perfume for men" is often a gift.
    */
   autoRemember?: boolean;
+  /** Several answers allowed (chips toggle on/off). Default: choose one */
+  multi?: boolean;
+  /** Most answers allowed when multi (e.g. "up to 3") */
+  max?: number;
+  /** Shown as "(optional)" in the panel */
+  optional?: boolean;
+  /** Show "+ Add more" so users can type their own answer */
+  allowCustom?: boolean;
+  /** Only show this question when another answer includes a value (e.g. laptop questions when "Laptops" is picked) */
+  showIf?: { key: string; includes: string };
+  /** Small heading for a group of questions, e.g. "Laptops" */
+  section?: string;
 }
 
 export interface BrandGroup {
@@ -57,9 +69,10 @@ export const CATEGORIES: CategoryDef[] = [
     example: 'Face wash for oily, acne-prone skin under ₹500',
     preferenceFields: [
       { key: 'skinType', label: 'Skin type', options: ['Oily', 'Dry', 'Combination', 'Normal', 'Sensitive'], autoRemember: true },
-      { key: 'concerns', label: 'Skin concerns', options: ['Acne', 'Pigmentation', 'Dullness', 'Large pores', 'Ageing', 'Redness'], autoRemember: true },
-      { key: 'avoid', label: 'Avoid', options: ['Fragrance', 'Alcohol', 'Essential oils', 'Parabens'], autoRemember: true },
-      { key: 'brandStyle', label: 'Brand preference', options: ['K-beauty', 'Indian brands', 'Clean / natural', 'Dermatologist brands'] },
+      { key: 'concerns', label: 'Skin concerns', options: ['Acne', 'Dark spots', 'Pigmentation', 'Dullness', 'Large pores', 'Ageing', 'Redness'], multi: true, max: 3, allowCustom: true, autoRemember: true },
+      { key: 'texture', label: 'Product preferences', options: ['Lightweight', 'Non-greasy', 'Hydrating', 'Matte finish'], multi: true, allowCustom: true },
+      { key: 'avoid', label: 'Ingredients to avoid', options: ['Fragrance', 'Alcohol', 'Essential oils', 'Parabens'], multi: true, optional: true, allowCustom: true, autoRemember: true },
+      { key: 'brandStyle', label: 'Brand preferences', options: ['K-beauty', 'Indian brands', 'Dermatologist brands', 'Clean / natural'], multi: true, optional: true, allowCustom: true },
     ],
     guidance: `Skincare expertise:
 - Oily / acne-prone: prefer niacinamide, salicylic acid (BHA), zinc, tea tree, centella, gel or water textures, "oil-free", "non-comedogenic", matte or gel sunscreens. Avoid heavy creams, rich oils, coconut oil.
@@ -101,9 +114,10 @@ export const CATEGORIES: CategoryDef[] = [
     example: 'Long-lasting matte lipstick for wheatish skin under ₹800',
     preferenceFields: [
       { key: 'skinTone', label: 'Skin tone', options: ['Fair', 'Light', 'Wheatish', 'Medium', 'Dusky', 'Deep'], autoRemember: true },
-      { key: 'undertone', label: 'Undertone', options: ['Warm', 'Cool', 'Neutral'], autoRemember: true },
-      { key: 'finish', label: 'Finish', options: ['Matte', 'Dewy', 'Natural', 'Satin'] },
-      { key: 'skinType', label: 'Skin type', options: ['Oily', 'Dry', 'Combination', 'Normal', 'Sensitive'], autoRemember: true },
+      { key: 'undertone', label: 'Undertone', options: ['Warm', 'Cool', 'Neutral', 'Not sure'], autoRemember: true },
+      { key: 'finish', label: 'Finish you like', options: ['Matte', 'Dewy', 'Natural', 'Satin'] },
+      { key: 'mustHaves', label: 'Must-haves', options: ['Long-lasting', 'Transfer-proof', 'Waterproof', 'Lightweight'], multi: true, allowCustom: true },
+      { key: 'brandStyle', label: 'Brand preferences', options: ['Indian brands', 'K-beauty', 'Luxury'], multi: true, optional: true, allowCustom: true },
     ],
     guidance: `Makeup expertise:
 - Match shades to skin tone and undertone when known; say which shade to pick if the listing shows shades.
@@ -136,10 +150,11 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: '👟',
     example: 'Running shoes for flat feet, size UK 9, under ₹4,000',
     preferenceFields: [
-      { key: 'shoeSize', label: 'Shoe size', placeholder: 'e.g. UK 9', autoRemember: true },
+      { key: 'shoeSize', label: 'Shoe size', options: ['UK 3', 'UK 4', 'UK 5', 'UK 6', 'UK 7', 'UK 8', 'UK 9', 'UK 10', 'UK 11', 'UK 12'], autoRemember: true },
       { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex', 'Kids'] },
-      { key: 'use', label: 'Mostly for', options: ['Running', 'Gym', 'Walking', 'Casual', 'Office', 'Sports'] },
-      { key: 'footType', label: 'Foot type', options: ['Flat feet', 'High arch', 'Wide feet', 'Normal'], autoRemember: true },
+      { key: 'use', label: 'Mostly for', options: ['Running', 'Gym', 'Walking', 'Casual', 'Office', 'Sports'], multi: true, allowCustom: true },
+      { key: 'footType', label: 'Foot type', options: ['Flat feet', 'High arch', 'Wide feet', 'Normal'], optional: true, autoRemember: true },
+      { key: 'brandStyle', label: 'Brand preferences', options: ['Sports brands', 'Indian brands'], multi: true, optional: true, allowCustom: true },
     ],
     guidance: `Footwear expertise:
 - Match the shoe to its use: running shoes need cushioning and breathable uppers; gym/training shoes need a flat, stable sole; walking shoes need comfort and grip.
@@ -167,10 +182,11 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: '👕',
     example: 'Linen shirt for men, size M, for office, under ₹1,500',
     preferenceFields: [
-      { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex', 'Kids'] },
       { key: 'size', label: 'Clothing size', options: ['XS', 'S', 'M', 'L', 'XL', 'XXL'], autoRemember: true },
-      { key: 'fit', label: 'Fit', options: ['Slim', 'Regular', 'Relaxed', 'Oversized'], autoRemember: true },
-      { key: 'style', label: 'Style', options: ['Casual', 'Office', 'Ethnic', 'Party', 'Streetwear', 'Minimal'] },
+      { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex', 'Kids'] },
+      { key: 'fit', label: 'Fit you like', options: ['Slim', 'Regular', 'Relaxed', 'Oversized'], autoRemember: true },
+      { key: 'style', label: 'Style', options: ['Casual', 'Office', 'Ethnic', 'Party', 'Streetwear', 'Minimal'], multi: true, allowCustom: true },
+      { key: 'fabric', label: 'Fabric preferences', options: ['Cotton', 'Linen', 'Denim', 'Silk', 'Wool'], multi: true, optional: true, allowCustom: true },
     ],
     guidance: `Fashion expertise:
 - Only pick items for the right gender and occasion. Respect fit and style preferences.
@@ -198,9 +214,22 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: '📱',
     example: 'Wireless earbuds with good bass for the gym under ₹2,000',
     preferenceFields: [
-      { key: 'ecosystem', label: 'Phone', options: ['Android', 'iPhone'], autoRemember: true },
-      { key: 'priority', label: 'Most important', options: ['Battery life', 'Performance', 'Camera', 'Sound quality', 'Build quality', 'Value for money'] },
-      { key: 'brandStyle', label: 'Brand preference', options: ['Indian brands', 'Global brands', 'No preference'] },
+      { key: 'devices', label: 'What do you usually buy', options: ['Phones', 'Laptops', 'Audio', 'Smartwatches', 'TVs', 'Tablets', 'Cameras', 'Gaming'], multi: true, allowCustom: true },
+      { key: 'priority', label: 'Most important to you', options: ['Battery life', 'Performance', 'Display', 'Camera', 'Sound quality', 'Build quality', 'Value for money'], multi: true, max: 3 },
+      { key: 'ecosystem', label: 'Your devices', options: ['Android', 'iPhone / Apple', 'Windows', 'Mac'], multi: true, optional: true, autoRemember: true },
+      { key: 'brandStyle', label: 'Brand preferences', options: ['Indian brands', 'Global brands'], multi: true, optional: true, allowCustom: true },
+      { key: 'phoneSize', label: 'Screen size', options: ['Compact', 'Regular', 'Large'], section: 'Phones', showIf: { key: 'devices', includes: 'Phones' } },
+      { key: 'phoneStorage', label: 'Storage', options: ['128GB', '256GB', '512GB+'], section: 'Phones', showIf: { key: 'devices', includes: 'Phones' } },
+      { key: 'laptopUse', label: 'Mostly for', options: ['Study', 'Office', 'Gaming', 'Coding', 'Design / editing'], multi: true, section: 'Laptops', showIf: { key: 'devices', includes: 'Laptops' } },
+      { key: 'laptopOS', label: 'System', options: ['Windows', 'Mac', 'Chromebook'], section: 'Laptops', showIf: { key: 'devices', includes: 'Laptops' } },
+      { key: 'laptopWeight', label: 'Weight', options: ['Light and portable', "Doesn't matter"], section: 'Laptops', showIf: { key: 'devices', includes: 'Laptops' } },
+      { key: 'audioType', label: 'Type', options: ['Earbuds', 'Over-ear headphones', 'Speakers', 'Soundbar'], multi: true, section: 'Audio', showIf: { key: 'devices', includes: 'Audio' } },
+      { key: 'audioMust', label: 'Must-haves', options: ['Noise cancellation', 'Deep bass', 'Low latency for gaming', 'Mic for calls'], multi: true, section: 'Audio', showIf: { key: 'devices', includes: 'Audio' } },
+      { key: 'watchUse', label: 'Main use', options: ['Fitness', 'Calling and notifications', 'Style'], multi: true, section: 'Smartwatches', showIf: { key: 'devices', includes: 'Smartwatches' } },
+      { key: 'watchWorksWith', label: 'Must work with', options: ['Android', 'iPhone'], section: 'Smartwatches', showIf: { key: 'devices', includes: 'Smartwatches' } },
+      { key: 'tvSize', label: 'Screen size', options: ['32-43"', '50-55"', '65"+'], section: 'TVs', showIf: { key: 'devices', includes: 'TVs' } },
+      { key: 'tvType', label: 'Screen type', options: ['LED', 'QLED', 'OLED'], section: 'TVs', showIf: { key: 'devices', includes: 'TVs' } },
+      { key: 'tvSystem', label: 'Smart system', options: ['Google TV', 'Fire TV', 'Tizen', 'webOS', "Doesn't matter"], section: 'TVs', showIf: { key: 'devices', includes: 'TVs' } },
     ],
     guidance: `Electronics expertise:
 - Compare on the specs that matter for the stated use (battery, ANC, latency for gaming, RAM/storage, refresh rate).
@@ -220,7 +249,7 @@ export const CATEGORIES: CategoryDef[] = [
     ],
     trustedStores: [...COMMON_TRUSTED, 'Croma', 'Reliance Digital', 'Vijay Sales', 'Tata CLiQ', 'Official brand store'],
     genderRelevant: false,
-    keyQuestion: { key: 'ecosystem', question: 'Which phone do you use?' },
+    keyQuestion: { key: 'devices', question: 'What electronics do you usually buy?' },
   },
   {
     id: 'perfumes',
@@ -229,8 +258,10 @@ export const CATEGORIES: CategoryDef[] = [
     example: 'Fruity, citrusy body mist from Bath & Body Works',
     preferenceFields: [
       { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex'] },
-      { key: 'scent', label: 'Scent you like', options: ['Fresh', 'Citrus', 'Fruity', 'Woody', 'Floral', 'Sweet', 'Spicy', 'Aquatic', 'Musky'] },
-      { key: 'occasion', label: 'Mostly for', options: ['Daily / office', 'Evening / party', 'Gym', 'Special occasions'] },
+      { key: 'scent', label: 'Scents you like', options: ['Fresh', 'Citrus', 'Fruity', 'Floral', 'Woody', 'Sweet', 'Spicy', 'Aquatic', 'Musky'], multi: true, max: 3, allowCustom: true },
+      { key: 'occasion', label: 'Mostly for', options: ['Daily / office', 'Evening / party', 'Gym', 'Special occasions'], multi: true },
+      { key: 'strength', label: 'Strength', options: ['Light and subtle', 'Moderate', 'Strong and long-lasting'] },
+      { key: 'perfumeType', label: 'Type', options: ['Perfume (EDP)', 'Body mist', 'Deodorant', 'Attar'], multi: true, optional: true, allowCustom: true },
     ],
     guidance: `Perfume expertise:
 - Match the scent family and occasion: fresh/citrus/aquatic for daytime and Indian heat; woody/spicy/sweet for evenings.
@@ -272,7 +303,7 @@ export const SHOPS_FOR_OPTIONS = ["Women's", "Men's", 'Both'];
 export const GLOBAL_PREFERENCE_FIELDS: PreferenceField[] = [
   { key: 'shopsFor', label: 'I usually shop for', options: SHOPS_FOR_OPTIONS },
   { key: 'budgetStyle', label: 'Budget style', options: ['Best value', 'Mid-range', 'Premium'] },
-  { key: 'stores', label: 'Stores I trust', placeholder: 'e.g. Amazon, Nykaa' },
+  { key: 'stores', label: 'Stores I trust', options: ['Amazon', 'Flipkart', 'Nykaa', 'Myntra'], multi: true, optional: true, allowCustom: true },
 ];
 
 export function getCategory(id?: string | null): CategoryDef {

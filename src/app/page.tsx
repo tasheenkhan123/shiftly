@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanelLeft, LogIn, Bookmark, AlertCircle } from 'lucide-react';
+import { PanelLeft, LogIn, Bookmark, AlertCircle, SlidersHorizontal } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatInput } from '@/components/ChatInput';
 import { ChatMessageBubble } from '@/components/ChatMessageBubble';
@@ -354,6 +354,16 @@ export default function HomePage() {
         user={user}
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenPreferences={() => openPreferences()}
+        onOpenSaved={() => {
+          setIsSavedDrawerOpen(true);
+          setSidebarOpen(false);
+        }}
+        onShowChat={() => {
+          setIsPrefsOpen(false);
+          setIsSavedDrawerOpen(false);
+          setSidebarOpen(false);
+        }}
+        savedCount={savedProducts.length}
         onSignOut={signOut}
       />
 
@@ -381,6 +391,17 @@ export default function HomePage() {
             >
               <Bookmark className="w-3.5 h-3.5 text-blue-600" />
               <span>Saved ({savedProducts.length})</span>
+            </button>
+            <button
+              onClick={() => openPreferences()}
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-700"
+              title="Your preferences"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600" />
+              <span className="hidden sm:inline">Preferences</span>
+              {!Object.values(profile).some(v => v && Object.keys(v).length > 0) && (
+                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-600" aria-label="Not set yet" />
+              )}
             </button>
             {ready && !user && (
               <button

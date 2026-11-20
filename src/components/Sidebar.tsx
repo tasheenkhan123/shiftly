@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Plus, MessageSquare, Trash2, PanelLeftClose, LogIn, Clock, Pin, PinOff, Cloud, HardDrive, SlidersHorizontal } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, PanelLeftClose, LogIn, Clock, Pin, PinOff, Cloud, HardDrive, SlidersHorizontal, Bookmark, History } from 'lucide-react';
 import { ChatSession, UserProfile } from '@/types';
 
 interface SidebarProps {
@@ -16,6 +16,9 @@ interface SidebarProps {
   user: UserProfile | null;
   onOpenAuth: () => void;
   onOpenPreferences: () => void;
+  onOpenSaved: () => void;
+  onShowChat: () => void;
+  savedCount: number;
   onSignOut: () => void;
 }
 
@@ -31,6 +34,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   user,
   onOpenAuth,
   onOpenPreferences,
+  onOpenSaved,
+  onShowChat,
+  savedCount,
   onSignOut
 }) => {
   return (
@@ -78,8 +84,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* History List: pinned chats first, then recent */}
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
+        {/* Main navigation */}
+        <nav className="px-2 pt-3 space-y-0.5" aria-label="Main">
+          {[
+            { label: 'Chat', icon: <MessageSquare className="w-4 h-4" />, onClick: onShowChat, active: true },
+            { label: 'Saved items', icon: <Bookmark className="w-4 h-4" />, onClick: onOpenSaved, badge: savedCount || undefined },
+            { label: 'Preferences', icon: <SlidersHorizontal className="w-4 h-4" />, onClick: onOpenPreferences },
+          ].map(item => (
+            <button
+              key={item.label}
+              onClick={item.onClick}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                item.active ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-900'
+              }`}
+            >
+              <span className={item.active ? 'text-blue-600' : 'text-slate-400'}>{item.icon}</span>
+              <span className="flex-1 text-left">{item.label}</span>
+              {item.badge ? <span className="text-[10px] text-slate-400">{item.badge}</span> : null}
+            </button>
+          ))}
+        </nav>
+
+        {/* History: pinned chats first, then recent */}
+        <div className="px-4 pt-4 pb-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+          <History className="w-3 h-3" />
+          <span>History</span>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 pb-3 space-y-4">
           {sessions.length === 0 ? (
             <div className="px-3 py-8 text-center text-slate-400 text-xs">
               <p>No searches yet.</p>
@@ -142,13 +173,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Bottom User Profile Section */}
         <div className="p-3 border-t border-slate-200/80 bg-white space-y-2">
-          <button
-            onClick={onOpenPreferences}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600" />
-            <span>Your preferences</span>
-          </button>
           {user && user.isLoggedIn ? (
             <div className="flex items-center justify-between gap-2 p-1.5 rounded-xl hover:bg-slate-50 transition-colors">
               <div className="flex items-center gap-2.5 min-w-0">

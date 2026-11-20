@@ -9,8 +9,8 @@ export function sanitizeProfile(raw: unknown): PreferenceProfile {
   for (const [scope, values] of Object.entries(raw as Record<string, unknown>)) {
     if (!scopes.has(scope) || !values || typeof values !== 'object') continue;
     const clean: Record<string, string> = {};
-    for (const [k, v] of Object.entries(values as Record<string, unknown>).slice(0, 12)) {
-      if (/^[a-zA-Z]{1,24}$/.test(k) && typeof v === 'string' && v.trim() && v.length <= 80) clean[k] = v.trim();
+    for (const [k, v] of Object.entries(values as Record<string, unknown>).slice(0, 24)) {
+      if (/^[a-zA-Z]{1,24}$/.test(k) && typeof v === 'string' && v.trim() && v.length <= 160) clean[k] = v.trim();
     }
     if (Object.keys(clean).length) out[scope as keyof PreferenceProfile] = clean;
   }
