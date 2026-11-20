@@ -49,6 +49,8 @@ export interface CategoryDef {
   label: string;
   emoji: string;
   example: string;
+  /** Several examples, rotated in the search box */
+  examples: string[];
   preferenceFields: PreferenceField[];
   guidance: string;
   brandGroups: BrandGroup[];
@@ -67,6 +69,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: 'Skincare',
     emoji: '🧴',
     example: 'Face wash for oily, acne-prone skin under ₹500',
+    examples: [
+      'Face wash for oily, acne-prone skin under ₹500',
+      'Sunscreen that won’t feel greasy under ₹800',
+      'K-beauty moisturiser for dry skin',
+      'Vitamin C serum for dark spots under ₹1,000',
+    ],
     preferenceFields: [
       { key: 'skinType', label: 'Skin type', options: ['Oily', 'Dry', 'Combination', 'Normal', 'Sensitive'], autoRemember: true },
       { key: 'concerns', label: 'Skin concerns', options: ['Acne', 'Dark spots', 'Pigmentation', 'Dullness', 'Large pores', 'Ageing', 'Redness'], multi: true, max: 3, allowCustom: true, autoRemember: true },
@@ -112,6 +120,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: 'Makeup',
     emoji: '💄',
     example: 'Long-lasting matte lipstick for wheatish skin under ₹800',
+    examples: [
+      'Long-lasting matte lipstick for wheatish skin under ₹800',
+      'Foundation for oily skin that lasts all day',
+      'Smudge-proof kajal under ₹400',
+      'Nude lipstick shades for warm undertones',
+    ],
     preferenceFields: [
       { key: 'skinTone', label: 'Skin tone', options: ['Fair', 'Light', 'Wheatish', 'Medium', 'Dusky', 'Deep'], autoRemember: true },
       { key: 'undertone', label: 'Undertone', options: ['Warm', 'Cool', 'Neutral', 'Not sure'], autoRemember: true },
@@ -149,6 +163,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: 'Footwear',
     emoji: '👟',
     example: 'Running shoes for flat feet, size UK 9, under ₹4,000',
+    examples: [
+      'Running shoes for flat feet, size UK 9, under ₹4,000',
+      'White sneakers for college under ₹2,500',
+      'Comfortable office shoes for women',
+      'Gym shoes for weight training under ₹3,000',
+    ],
     preferenceFields: [
       { key: 'shoeSize', label: 'Shoe size', options: ['UK 3', 'UK 4', 'UK 5', 'UK 6', 'UK 7', 'UK 8', 'UK 9', 'UK 10', 'UK 11', 'UK 12'], autoRemember: true },
       { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex', 'Kids'] },
@@ -181,6 +201,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: 'Fashion',
     emoji: '👕',
     example: 'Linen shirt for men, size M, for office, under ₹1,500',
+    examples: [
+      'Linen shirt for men, size M, for office, under ₹1,500',
+      'Red sweater for a Christmas party under ₹3,000',
+      'Kurta set for a wedding under ₹4,000',
+      'Oversized hoodie for winter',
+    ],
     preferenceFields: [
       { key: 'size', label: 'Clothing size', options: ['XS', 'S', 'M', 'L', 'XL', 'XXL'], autoRemember: true },
       { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex', 'Kids'] },
@@ -213,6 +239,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: 'Electronics',
     emoji: '📱',
     example: 'Wireless earbuds with good bass for the gym under ₹2,000',
+    examples: [
+      'Wireless earbuds with good bass for the gym under ₹2,000',
+      'Laptop for coding under ₹60,000',
+      'Smartwatch that works with iPhone',
+      'Gaming setup under 1 lakh',
+    ],
     preferenceFields: [
       { key: 'devices', label: 'What do you usually buy', options: ['Phones', 'Laptops', 'Audio', 'Smartwatches', 'TVs', 'Tablets', 'Cameras', 'Gaming'], multi: true, allowCustom: true },
       { key: 'priority', label: 'Most important to you', options: ['Battery life', 'Performance', 'Display', 'Camera', 'Sound quality', 'Build quality', 'Value for money'], multi: true, max: 3 },
@@ -256,6 +288,12 @@ export const CATEGORIES: CategoryDef[] = [
     label: 'Perfumes',
     emoji: '🌸',
     example: 'Fruity, citrusy body mist from Bath & Body Works',
+    examples: [
+      'Fruity, citrusy body mist from Bath & Body Works',
+      'Long-lasting perfume for men for the office',
+      'Perfume gift for my mom under ₹3,000',
+      'Fresh deodorant for summer',
+    ],
     preferenceFields: [
       { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex'] },
       { key: 'scent', label: 'Scents you like', options: ['Fresh', 'Citrus', 'Fruity', 'Floral', 'Woody', 'Sweet', 'Spicy', 'Aquatic', 'Musky'], multi: true, max: 3, allowCustom: true },
@@ -290,6 +328,7 @@ export const CATEGORIES: CategoryDef[] = [
     label: 'Other',
     emoji: '🛍️',
     example: 'Air fryer for a family of 4 under ₹6,000',
+    examples: ['Air fryer for a family of 4 under ₹6,000'],
     preferenceFields: [],
     guidance: 'General shopping: pick well-reviewed products from reputed brands that match exactly what was asked.',
     brandGroups: [],
@@ -311,6 +350,9 @@ export function getCategory(id?: string | null): CategoryDef {
 }
 
 export const SELECTABLE_CATEGORIES = CATEGORIES.filter(c => c.id !== 'other');
+
+/** A mix of examples from every category, for the search box when no category is picked */
+export const MIXED_EXAMPLES: string[] = SELECTABLE_CATEGORIES.flatMap((c, i) => [c.examples[i % c.examples.length], c.examples[(i + 1) % c.examples.length]]);
 
 /** Finds brand groups mentioned in text ("K-beauty", "Indian brands"...) for a category */
 export function findBrandGroups(text: string, categoryId: CategoryId): BrandGroup[] {

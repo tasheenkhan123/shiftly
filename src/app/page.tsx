@@ -11,7 +11,7 @@ import { SavedLooksDrawer } from '@/components/SavedLooksDrawer';
 import { PreferencesModal } from '@/components/PreferencesModal';
 import { OnboardingModal } from '@/components/OnboardingModal';
 import { CategoryTile } from '@/components/CategoryIcon';
-import { SELECTABLE_CATEGORIES, getCategory, type CategoryId, type PreferenceProfile } from '@/lib/categories';
+import { SELECTABLE_CATEGORIES, MIXED_EXAMPLES, getCategory, type CategoryId, type PreferenceProfile } from '@/lib/categories';
 import { ChatSession, ChatMessage, ProductMatch, SearchProgressEvent } from '@/types';
 import { useAuth } from '@/lib/supabase/useAuth';
 import { getSupabase } from '@/lib/supabase/client';
@@ -377,11 +377,15 @@ export default function HomePage() {
             >
               <PanelLeft className="w-5 h-5" />
             </button>
-            <div className="flex items-center gap-2 font-bold text-slate-800 text-sm">
+            {/* Logo only on small screens, where the sidebar (with the logo) is hidden */}
+            <div className="flex items-center gap-2 font-bold text-slate-800 text-sm lg:hidden">
               <span className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs">S</span>
               <span>Siftly</span>
-              <span className="text-[11px] font-normal text-slate-400 hidden sm:inline">· Smart shopping assistant</span>
             </div>
+            {/* On desktop: the open chat's title */}
+            {activeSession && activeSession.messages.length > 0 && (
+              <span className="hidden lg:block text-sm font-semibold text-slate-700 truncate max-w-md">{activeSession.title}</span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -439,13 +443,17 @@ export default function HomePage() {
                       key={c.id}
                       onClick={() => setSelectedCategory(on ? null : c.id)}
                       aria-pressed={on}
+                      aria-label={c.label}
                       style={{ animationDelay: `${240 + i * 50}ms` }}
-                      className={`siftly-pop pl-1.5 pr-3 py-1.5 rounded-full text-xs font-semibold border transition-colors flex items-center gap-2 ${
-                        on ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      className={`siftly-pop group relative p-1.5 rounded-2xl border transition-colors ${
+                        on ? 'bg-slate-900 border-slate-900' : 'bg-white border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      <CategoryTile id={c.id} />
-                      {c.label}
+                      <CategoryTile id={c.id} size="lg" />
+                      {/* Name on hover / focus */}
+                      <span className="pointer-events-none absolute -bottom-7 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                        {c.label}
+                      </span>
                     </button>
                   );
                 })}
@@ -489,7 +497,7 @@ export default function HomePage() {
           <ChatInput
             onSend={handleSendMessage}
             isLoading={isLoading}
-            placeholder={selectedCategory ? `e.g. ${getCategory(selectedCategory).example}` : undefined}
+            examples={selectedCategory ? getCategory(selectedCategory).examples : MIXED_EXAMPLES}
             forSomeoneElse={forSomeoneElse}
             onToggleForSomeoneElse={() => setForSomeoneElse(v => !v)}
           />

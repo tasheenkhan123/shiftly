@@ -61,7 +61,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
                 S
               </div>
-              <span className="font-semibold text-slate-800 text-sm tracking-tight">Siftly</span>
+              <div className="flex flex-col leading-tight">
+                <span className="font-semibold text-slate-800 text-sm tracking-tight">Siftly</span>
+                <span className="text-[10px] text-slate-400">Smart AI shopping assistant</span>
+              </div>
             </div>
             <button
               onClick={onToggle}

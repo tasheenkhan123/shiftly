@@ -55,9 +55,9 @@ export function CategoryIcon({ id, className = 'w-3.5 h-3.5' }: { id: string; cl
 }
 
 /** Coloured rounded tile with the category icon, for category buttons and tabs */
-export function CategoryTile({ id, size = 'md' }: { id: string; size?: 'sm' | 'md' }) {
-  const box = size === 'sm' ? 'w-5 h-5 rounded-md' : 'w-6 h-6 rounded-lg';
-  const icon = size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5';
+export function CategoryTile({ id, size = 'md' }: { id: string; size?: 'sm' | 'md' | 'lg' }) {
+  const box = size === 'sm' ? 'w-5 h-5 rounded-md' : size === 'lg' ? 'w-11 h-11 rounded-xl' : 'w-6 h-6 rounded-lg';
+  const icon = size === 'sm' ? 'w-3 h-3' : size === 'lg' ? 'w-5 h-5' : 'w-3.5 h-3.5';
   return (
     <span className={`${box} ${COLORS[id] || COLORS.other} inline-flex items-center justify-center shrink-0`}>
       <CategoryIcon id={id} className={icon} />
