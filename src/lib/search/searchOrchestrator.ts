@@ -18,6 +18,13 @@ import { createEmptyResponse } from '@/lib/search/responses';
  * - Recommends first without questionnaire behavior.
  * - Discovers real products via Tavily live search with exact retailer links.
  */
+/** After SerpApi says the plan is used up, skip it for a while instead of failing on every search */
+let serpApiQuotaHitAt = 0;
+const QUOTA_RETRY_MS = 15 * 60 * 1000;
+
+const WEB_SEARCH_NOTE =
+  'Google Shopping is out of searches until its plan resets, so these come from web search: prices may be outdated and store comparison is unavailable.';
+
 export async function searchProducts(
   rawInput: string,
   imagePreviewUrl?: string,
@@ -61,15 +68,18 @@ export async function searchProducts(
     // ==========================================
     // PREFERRED: Google Shopping (real listings, real prices, real store comparison)
     // ==========================================
-    if (isGoogleShoppingConfigured()) {
+    let quotaHit = Date.now() - serpApiQuotaHitAt < QUOTA_RETRY_MS;
+    if (isGoogleShoppingConfigured() && !quotaHit) {
       try {
         const gs = await runGoogleShoppingFlow(rawInput, parsedIntent, geminiApiKey, startTime, imagePreviewUrl, constraints, onProgress);
         if (gs) return gs;
       } catch (err: any) {
-        // Out of SerpApi searches: say so honestly instead of showing weaker fallback results
+        // Out of SerpApi searches: use Tavily web search if available (clearly labelled), else say so honestly
         if (err instanceof SearchQuotaError) {
           console.error('[google-shopping] quota exhausted:', err.message);
-          return createEmptyResponse(rawInput, QUOTA_MESSAGE, startTime, constraints);
+          serpApiQuotaHitAt = Date.now();
+          quotaHit = true;
+          if (!process.env.TAVILY_API_KEY?.trim()) return createEmptyResponse(rawInput, QUOTA_MESSAGE, startTime, constraints);
         }
         console.error('[google-shopping] failed, falling back to Tavily web search:', err?.message);
       }
@@ -80,14 +90,18 @@ export async function searchProducts(
     if (!tavilyApiKey) {
       return createEmptyResponse(
         rawInput,
-        isGoogleShoppingConfigured()
+        quotaHit
+          ? QUOTA_MESSAGE
+          : isGoogleShoppingConfigured()
           ? 'Google Shopping search failed just now. Please try again in a moment.'
           : 'No product search is configured. Add SERPAPI_API_KEY (Google Shopping) to .env.local.',
         startTime,
         constraints
       );
     }
-    return await runTavilyFallback({ rawInput, parsedIntent, tavilyApiKey, geminiApiKey, imagePreviewUrl, constraints, startTime, onProgress });
+    const web = await runTavilyFallback({ rawInput, parsedIntent, tavilyApiKey, geminiApiKey, imagePreviewUrl, constraints, startTime, onProgress });
+    if (quotaHit) web.result.assumptions = WEB_SEARCH_NOTE;
+    return web;
   } catch (error: any) {
     console.error('Tavily + Gemini Pipeline Error:', error);
     return createEmptyResponse(

@@ -25,6 +25,7 @@ import type {
   ScoredCandidate,
 } from '@/lib/search/types';
 import { createEmptyResponse } from '@/lib/search/responses';
+import { stripBudgetWords } from '@/lib/search/googleShoppingFlow';
 
 export const NON_RETAIL_DOMAINS = [
   'femina.in', 'cosmopolitan.in', 'vogue.in', 'elle.in', 'gqindia.com',
@@ -1203,10 +1204,10 @@ export async function runTavilyFallback(args: {
   }));
 
   // Construct conversational summary
-  let assistantSummary = extraction.summary || `I found top product recommendations for "${rawInput}" on live retailers.`;
-  if (parsedIntent.appliedPreferences && parsedIntent.appliedPreferences.length > 0) {
-    assistantSummary = `Here are the top recommendations for **${parsedIntent.cleanTarget}** tailored to your preferences (${parsedIntent.appliedPreferences.join(', ')}):\n\n` + assistantSummary;
-  }
+  // Short heading, like the Google Shopping replies (the cards carry the details)
+  const target = stripBudgetWords(parsedIntent.cleanTarget);
+  const budgetStr = parsedIntent.budgetMax ? ` under ₹${parsedIntent.budgetMax.toLocaleString('en-IN')}` : '';
+  const assistantSummary = `Top ${productMatches.length} **${target}**${budgetStr}`;
 
   const analysisResult: SiftlyAnalysisResult = {
     id: `siftly_${Date.now()}`,
