@@ -44,7 +44,7 @@ flowchart LR
 - **Hedged LLM requests.** I timed each Gemini model on the project's key: the fastest answered in ~1.5–2s while others took 2–20s or returned "high demand". Siftly calls the fastest first and, if it hasn't answered in a few seconds, starts a backup model in parallel; the first valid answer wins, with a hard time budget per step.
 - **Data quality filters.** Overseas importers (which list inflated import prices) are filtered, http store links are upgraded to https, out-of-stock stores never become "lowest price", and prices below 55% / above 3× the median are flagged or dropped.
 - **Brand catalogs.** For "Bath & Body Works fruity mist", a descriptive query returned 36/40 overseas importers; searching the brand's catalog by product type returned the official India store at the real ₹999. Official stores are matched even when titles omit the brand.
-- **Abuse protection.** Per-user/per-IP hourly search limits, counted in Supabase via a `security definer` function (HMAC-hashed keys; no raw IPs stored), with an in-memory fallback.
+- **Free-plan limits and abuse protection.** 5 free searches per person per day (configurable), counted in Supabase via a `security definer` function (HMAC-hashed keys; no raw IPs stored), with an in-memory fallback.
 - **Streaming UX.** The API streams NDJSON progress; the UI shows one live "thinking" line and "Searched for Ns".
 - **Privacy & security.** Row Level Security on every table, profile input sanitised before it reaches prompts, guest data never leaves the browser.
 

@@ -51,15 +51,16 @@ export async function POST(req: NextRequest) {
       }))
     : [];
 
-  // Abuse protection: per-user / per-IP hourly limit (checked only for valid requests)
+  // Free plan limit: per user / per IP per day (checked only for valid requests)
   const quota = await consumeSearchQuota(req.headers);
   if (!quota.allowed) {
-    const minutes = Math.max(1, Math.ceil(quota.resetInSeconds / 60));
+    const hours = Math.floor(quota.resetInSeconds / 3600);
+    const minutes = Math.max(1, Math.ceil((quota.resetInSeconds % 3600) / 60));
+    const wait = hours >= 1 ? `about ${hours} hour${hours > 1 ? 's' : ''}` : `about ${minutes} minute${minutes > 1 ? 's' : ''}`;
     return NextResponse.json(
       {
-        error: quota.signedIn
-          ? `You've reached the limit of ${quota.limit} searches per hour. Please try again in about ${minutes} minute${minutes > 1 ? 's' : ''}.`
-          : `Guests can run ${quota.limit} searches per hour. Sign in for more, or try again in about ${minutes} minute${minutes > 1 ? 's' : ''}.`,
+        error: `You've used your ${quota.limit} free searches for today. Your free searches refill in ${wait}. Plans with more searches are coming soon.`,
+        limitReached: true,
       },
       { status: 429, headers: { 'Retry-After': String(quota.resetInSeconds) } }
     );

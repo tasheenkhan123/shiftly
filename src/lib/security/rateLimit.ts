@@ -1,8 +1,8 @@
 /**
  * Per-user search limits, so a bot or a shared link can't burn through the SerpApi / Gemini credits.
  *
- * - Signed-in users (valid Supabase access token): SEARCH_LIMIT_USER_PER_HOUR (default 40)
- * - Guests (by IP address):                          SEARCH_LIMIT_GUEST_PER_HOUR (default 10)
+ * Free plan: SEARCH_LIMIT_PER_DAY searches per day (default 5), for guests (by IP) and signed-in users alike.
+ * Optional overrides: SEARCH_LIMIT_GUEST_PER_DAY, SEARCH_LIMIT_USER_PER_DAY. Window: SEARCH_LIMIT_WINDOW_HOURS (default 24).
  *
  * Counts live in Supabase (consume_search_quota in supabase/schema.sql), so the limit holds across all of
  * Vercel's server instances. If that function isn't installed yet, an in-memory limiter is used instead
@@ -13,7 +13,7 @@
 import { createHmac } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
-const WINDOW_SECONDS = 60 * 60;
+const windowSeconds = () => intEnv('SEARCH_LIMIT_WINDOW_HOURS', 24) * 60 * 60;
 
 export interface QuotaResult {
   allowed: boolean;
@@ -23,7 +23,7 @@ export interface QuotaResult {
   signedIn: boolean;
 }
 
-function intEnv(name: string, fallback: number): number {
+export function intEnv(name: string, fallback: number): number {
   const n = parseInt(process.env[name] || '', 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
@@ -69,6 +69,7 @@ const memory = new Map<string, { windowStart: number; count: number }>();
 function consumeInMemory(key: string, limit: number): { allowed: boolean; count: number; resetInSeconds: number } {
   const now = Date.now();
   let entry = memory.get(key);
+  const WINDOW_SECONDS = windowSeconds();
   if (!entry || now - entry.windowStart >= WINDOW_SECONDS * 1000) {
     entry = { windowStart: now, count: 0 };
     memory.set(key, entry);
@@ -84,7 +85,9 @@ let warnedNoRpc = false;
 export async function consumeSearchQuota(headers: Headers): Promise<QuotaResult> {
   const userId = await verifiedUserId(headers.get('authorization'));
   const signedIn = Boolean(userId);
-  const limit = signedIn ? intEnv('SEARCH_LIMIT_USER_PER_HOUR', 40) : intEnv('SEARCH_LIMIT_GUEST_PER_HOUR', 10);
+  const free = intEnv('SEARCH_LIMIT_PER_DAY', 5);
+  const limit = signedIn ? intEnv('SEARCH_LIMIT_USER_PER_DAY', free) : intEnv('SEARCH_LIMIT_GUEST_PER_DAY', free);
+  const WINDOW_SECONDS = windowSeconds();
   const key = hashKey(signedIn ? `user:${userId}` : `ip:${clientIp(headers)}`);
 
   const sb = supabaseServerClient();

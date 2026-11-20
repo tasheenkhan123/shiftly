@@ -5,10 +5,10 @@ describe('search rate limits (in-memory fallback, no Supabase)', () => {
     vi.resetModules();
     delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    process.env.SEARCH_LIMIT_GUEST_PER_HOUR = '2';
+    process.env.SEARCH_LIMIT_PER_DAY = '2';
   });
 
-  it('blocks a guest after the hourly limit, per IP', async () => {
+  it('blocks a guest after the daily free limit, per IP', async () => {
     const { consumeSearchQuota } = await import('@/lib/security/rateLimit');
     const from = (ip: string) => new Headers({ 'x-forwarded-for': ip });
 
@@ -27,5 +27,13 @@ describe('search rate limits (in-memory fallback, no Supabase)', () => {
     const q = await consumeSearchQuota(new Headers({ authorization: 'Bearer fake', 'x-forwarded-for': '3.3.3.3' }));
     expect(q.signedIn).toBe(false);
     expect(q.limit).toBe(2);
+  });
+
+  it('defaults to 5 free searches per day', async () => {
+    delete process.env.SEARCH_LIMIT_PER_DAY;
+    const { consumeSearchQuota } = await import('@/lib/security/rateLimit');
+    const q = await consumeSearchQuota(new Headers({ 'x-forwarded-for': '4.4.4.4' }));
+    expect(q.limit).toBe(5);
+    expect(q.resetInSeconds).toBeGreaterThan(23 * 3600);
   });
 });
