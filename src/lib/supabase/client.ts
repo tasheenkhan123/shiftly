@@ -29,5 +29,6 @@ export function isAuthConfigured(): boolean {
 }
 
 export function isGoogleSignInEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_SUPABASE_GOOGLE_ENABLED === 'true';
+  // Shown by default; set NEXT_PUBLIC_SUPABASE_GOOGLE_ENABLED=false to hide it
+  return process.env.NEXT_PUBLIC_SUPABASE_GOOGLE_ENABLED !== 'false';
 }

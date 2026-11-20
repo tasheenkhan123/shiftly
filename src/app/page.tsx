@@ -409,7 +409,7 @@ export default function HomePage() {
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold"
               >
                 <LogIn className="w-3.5 h-3.5" />
-                <span>Sign in</span>
+                <span>Sign up</span>
               </button>
             )}
           </div>

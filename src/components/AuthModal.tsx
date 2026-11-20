@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { X, Loader2, Mail, Lock, User as UserIcon, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Loader2, Mail, Lock, User as UserIcon, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react';
 import { getSupabase, isAuthConfigured, isGoogleSignInEnabled } from '@/lib/supabase/client';
 import { SHOPS_FOR_OPTIONS } from '@/lib/categories';
 
@@ -16,7 +16,9 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordRecovery, onPasswordRecoveryDone }) => {
-  const [mode, setMode] = useState<Mode>('signin');
+  const [mode, setMode] = useState<Mode>('signup');
+  // First screen offers Google or email; 'email' shows the form
+  const [step, setStep] = useState<'choose' | 'email'>('choose');
   const [name, setName] = useState('');
   const [shopsFor, setShopsFor] = useState('');
   const [email, setEmail] = useState('');
@@ -28,6 +30,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordR
   useEffect(() => {
     if (passwordRecovery) setMode('reset');
   }, [passwordRecovery]);
+
+  // Every time the window opens: start at "Create your account" with the two options
+  useEffect(() => {
+    if (isOpen && !passwordRecovery) {
+      setMode('signup');
+      setStep('choose');
+    }
+  }, [isOpen, passwordRecovery]);
 
   useEffect(() => {
     setError(null);
@@ -88,6 +98,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordR
   const handleGoogle = async () => {
     if (!sb) return;
     setBusy(true);
+    setError(null);
+    // Check Google is switched on in Supabase first; otherwise the redirect lands on a raw error page
+    try {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+      const res = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key || '' } });
+      const settings = await res.json();
+      if (settings?.external && settings.external.google === false) {
+        setError("Google sign-in isn't switched on yet. Please continue with email for now.");
+        setBusy(false);
+        return;
+      }
+    } catch {
+      // if the check fails, try anyway
+    }
     const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
     if (error) {
       setError(friendlyError(error.message));
@@ -96,13 +121,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordR
   };
 
   const titles: Record<Mode, string> = {
-    signin: 'Sign in to Siftly',
-    signup: 'Create your account',
+    signin: 'Welcome back',
+    signup: 'Create your Siftly account',
     forgot: 'Reset your password',
     reset: 'Choose a new password',
   };
   const subtitles: Record<Mode, string> = {
-    signin: 'Your searches, pinned chats and saved items sync to your account.',
+    signin: 'Sign in to sync your searches, pinned chats and saved items.',
     signup: 'Save products and keep your search history on every device.',
     forgot: "Enter your email and we'll send you a reset link.",
     reset: 'Enter a new password for your account.',
@@ -133,108 +158,136 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordR
           </div>
         ) : (
           <>
-            {isGoogleSignInEnabled() && (mode === 'signin' || mode === 'signup') && (
-              <>
+            {(mode === 'signin' || mode === 'signup') && step === 'choose' ? (
+              <div className="space-y-2.5">
+                {isGoogleSignInEnabled() && (
+                  <button
+                    type="button"
+                    onClick={handleGoogle}
+                    disabled={busy}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-sm font-semibold text-slate-800 disabled:opacity-60"
+                  >
+                    {busy ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
+                        <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z" />
+                        <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z" />
+                        <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z" />
+                        <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z" />
+                      </svg>
+                    )}
+                    Continue with Google
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={handleGoogle}
-                  disabled={busy}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-sm font-semibold text-slate-800 disabled:opacity-60"
+                  onClick={() => setStep('email')}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold"
                 >
-                  <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden="true">
-                    <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z" />
-                    <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z" />
-                    <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z" />
-                    <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z" />
-                  </svg>
-                  Continue with Google
+                  <Mail className="w-4 h-4" /> Continue with email
                 </button>
-                <div className="flex items-center gap-3 my-4 text-[11px] text-slate-400">
-                  <span className="h-px flex-1 bg-slate-200" /> or <span className="h-px flex-1 bg-slate-200" />
-                </div>
+                {error && (
+                  <p className="flex items-start gap-1.5 text-xs text-red-600">
+                    <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <>
+                {(mode === 'signin' || mode === 'signup') && (
+                  <button
+                    type="button"
+                    onClick={() => setStep('choose')}
+                    className="mb-3 text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" /> Other options
+                  </button>
+                )}
+            <form onSubmit={handleSubmit} className="space-y-3">
+                {mode === 'signup' && (
+                  <Field icon={<UserIcon className="w-4 h-4" />} type="text" placeholder="Your name" value={name} onChange={setName} autoComplete="name" />
+                )}
+                {mode === 'signup' && (
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-semibold text-slate-700">
+                      I usually shop for <span className="font-normal text-slate-400">(optional)</span>
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[...SHOPS_FOR_OPTIONS, 'Prefer not to say'].map(opt => {
+                        const value = opt === 'Prefer not to say' ? '' : opt;
+                        const on = shopsFor === value && (value !== '' || shopsFor === '');
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => setShopsFor(value)}
+                            className={`px-2.5 py-1 rounded-lg text-xs border ${
+                              on ? 'bg-blue-50 border-blue-300 text-blue-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-400">Helps pick clothes, shoes and fragrances. You can always ask for something else.</p>
+                  </div>
+                )}
+                {mode !== 'reset' && (
+                  <Field icon={<Mail className="w-4 h-4" />} type="email" placeholder="Email" value={email} onChange={setEmail} autoComplete="email" required />
+                )}
+                {mode !== 'forgot' && (
+                  <Field
+                    icon={<Lock className="w-4 h-4" />}
+                    type="password"
+                    placeholder={mode === 'signin' ? 'Password' : 'New password (8+ characters)'}
+                    value={password}
+                    onChange={setPassword}
+                    autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                    required
+                  />
+                )}
+  
+                {error && (
+                  <p className="flex items-start gap-1.5 text-xs text-red-600">
+                    <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+                  </p>
+                )}
+                {notice && (
+                  <p className="flex items-start gap-1.5 text-xs text-emerald-700">
+                    <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {notice}
+                  </p>
+                )}
+  
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold disabled:opacity-60"
+                >
+                  {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Update password'}
+                </button>
+            </form>
               </>
             )}
-
-            <form onSubmit={handleSubmit} className="space-y-3">
-              {mode === 'signup' && (
-                <Field icon={<UserIcon className="w-4 h-4" />} type="text" placeholder="Your name" value={name} onChange={setName} autoComplete="name" />
-              )}
-              {mode === 'signup' && (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-semibold text-slate-700">
-                    I usually shop for <span className="font-normal text-slate-400">(optional)</span>
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[...SHOPS_FOR_OPTIONS, 'Prefer not to say'].map(opt => {
-                      const value = opt === 'Prefer not to say' ? '' : opt;
-                      const on = shopsFor === value && (value !== '' || shopsFor === '');
-                      return (
-                        <button
-                          key={opt}
-                          type="button"
-                          onClick={() => setShopsFor(value)}
-                          className={`px-2.5 py-1 rounded-lg text-xs border ${
-                            on ? 'bg-blue-50 border-blue-300 text-blue-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                          }`}
-                        >
-                          {opt}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[10px] text-slate-400">Helps pick clothes, shoes and fragrances. You can always ask for something else.</p>
-                </div>
-              )}
-              {mode !== 'reset' && (
-                <Field icon={<Mail className="w-4 h-4" />} type="email" placeholder="Email" value={email} onChange={setEmail} autoComplete="email" required />
-              )}
-              {mode !== 'forgot' && (
-                <Field
-                  icon={<Lock className="w-4 h-4" />}
-                  type="password"
-                  placeholder={mode === 'signin' ? 'Password' : 'New password (8+ characters)'}
-                  value={password}
-                  onChange={setPassword}
-                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                  required
-                />
-              )}
-
-              {error && (
-                <p className="flex items-start gap-1.5 text-xs text-red-600">
-                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
-                </p>
-              )}
-              {notice && (
-                <p className="flex items-start gap-1.5 text-xs text-emerald-700">
-                  <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {notice}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={busy}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold disabled:opacity-60"
-              >
-                {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-                {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : mode === 'forgot' ? 'Send reset link' : 'Update password'}
-              </button>
-            </form>
 
             <div className="mt-4 text-xs text-slate-500 text-center space-y-1.5">
               {mode === 'signin' && (
                 <>
-                  <button className="text-blue-600 hover:underline" onClick={() => setMode('forgot')}>Forgot password?</button>
+                  {step === 'email' && (
+                    <button className="text-blue-600 hover:underline" onClick={() => setMode('forgot')}>Forgot password?</button>
+                  )}
                   <p>
                     New to Siftly?{' '}
-                    <button className="text-blue-600 font-semibold hover:underline" onClick={() => setMode('signup')}>Create an account</button>
+                    <button className="text-blue-600 font-semibold hover:underline" onClick={() => { setMode('signup'); setStep('choose'); }}>Sign up</button>
                   </p>
                 </>
               )}
               {(mode === 'signup' || mode === 'forgot') && (
                 <p>
                   Already have an account?{' '}
-                  <button className="text-blue-600 font-semibold hover:underline" onClick={() => setMode('signin')}>Sign in</button>
+                  <button className="text-blue-600 font-semibold hover:underline" onClick={() => { setMode('signin'); setStep('choose'); }}>Sign in</button>
                 </p>
               )}
             </div>
