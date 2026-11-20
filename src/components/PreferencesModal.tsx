@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { X, Check, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import {
   GLOBAL_PREFERENCE_FIELDS,
   SELECTABLE_CATEGORIES,
@@ -35,9 +36,9 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({ isOpen, onCl
 
   if (!isOpen) return null;
 
-  const tabs: { id: Scope; label: string; emoji: string }[] = [
-    ...SELECTABLE_CATEGORIES.map(c => ({ id: c.id as Scope, label: c.label, emoji: c.emoji })),
-    { id: 'global', label: 'Everything', emoji: '⚙️' },
+  const tabs: { id: Scope; label: string }[] = [
+    ...SELECTABLE_CATEGORIES.map(c => ({ id: c.id as Scope, label: c.label })),
+    { id: 'global', label: 'Everything' },
   ];
   const fields: PreferenceField[] =
     tab === 'global' ? GLOBAL_PREFERENCE_FIELDS : SELECTABLE_CATEGORIES.find(c => c.id === tab)?.preferenceFields || [];
@@ -84,11 +85,12 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({ isOpen, onCl
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
+              className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors flex items-center gap-1.5 ${
                 tab === t.id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
             >
-              {t.emoji} {t.label}
+              <CategoryIcon id={t.id} className="w-3.5 h-3.5" />
+              {t.label}
               {countFor(t.id) > 0 && <span className="ml-1 text-[10px] opacity-70">({countFor(t.id)})</span>}
             </button>
           ))}

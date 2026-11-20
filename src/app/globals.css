@@ -114,3 +114,16 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .siftly-shimmer { animation: none; color: #475569; background: none; }
 }
+
+/* Start screen: elements pop in one after another when the app opens */
+.siftly-pop {
+  opacity: 0;
+  animation: siftly-pop 520ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes siftly-pop {
+  0% { opacity: 0; transform: translateY(10px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .siftly-pop { animation: none; opacity: 1; }
+}

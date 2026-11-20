@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Gift, ImagePlus, Loader2, X } from 'lucide-react';
+import { ArrowUp, Gift, ImagePlus, Loader2, Mic, Square, X } from 'lucide-react';
 import { downscaleImage } from '@/lib/image';
 
 interface ChatInputProps {
@@ -23,8 +23,56 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading, placeho
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Voice input (browser speech recognition: Chrome, Edge, Safari; hidden where unsupported, e.g. Firefox)
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const voiceBaseTextRef = useRef('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const w = window as any;
+    setVoiceSupported(Boolean(w.SpeechRecognition || w.webkitSpeechRecognition));
+    return () => recognitionRef.current?.abort?.();
+  }, []);
+
+  const toggleVoice = () => {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const w = window as any;
+    const Recognition = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Recognition) return;
+    const rec = new Recognition();
+    rec.lang = 'en-IN';
+    rec.interimResults = true;
+    rec.continuous = false;
+    voiceBaseTextRef.current = text.trim() ? `${text.trim()} ` : '';
+    rec.onresult = (e: any) => {
+      let spoken = '';
+      for (let i = 0; i < e.results.length; i++) spoken += e.results[i][0].transcript;
+      setText(voiceBaseTextRef.current + spoken);
+    };
+    rec.onerror = (e: any) => {
+      setError(
+        e.error === 'not-allowed' || e.error === 'service-not-allowed'
+          ? 'Microphone access is blocked. Allow it in your browser to use voice.'
+          : e.error === 'no-speech'
+            ? "Didn't catch that. Tap the mic and try again."
+            : 'Voice input stopped. Please try again.'
+      );
+    };
+    rec.onend = () => {
+      setListening(false);
+      textareaRef.current?.focus();
+    };
+    recognitionRef.current = rec;
+    setError(null);
+    setListening(true);
+    rec.start();
+  };
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -151,9 +199,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading, placeho
                 handleSubmit();
               }
             }}
-            placeholder={image ? 'Add details (optional), e.g. "under ₹2,000" or "cheaper alternatives"' : placeholder || 'What are you shopping for? e.g. "face wash for oily skin under ₹500"'}
+            placeholder={
+              listening
+                ? 'Listening… speak now'
+                : image
+                  ? 'Add details (optional), e.g. "under ₹2,000" or "cheaper alternatives"'
+                  : placeholder || 'What are you shopping for? e.g. "face wash for oily skin under ₹500"'
+            }
             className="flex-1 bg-transparent resize-none text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none leading-relaxed py-2 max-h-36"
           />
+          {voiceSupported && (
+            <button
+              type="button"
+              onClick={toggleVoice}
+              aria-pressed={listening}
+              aria-label={listening ? 'Stop voice input' : 'Speak your search'}
+              title={listening ? 'Stop' : 'Speak your search'}
+              className={`shrink-0 p-2.5 rounded-xl transition-colors ${
+                listening ? 'bg-red-50 text-red-600 animate-pulse' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'
+              }`}
+            >
+              {listening ? <Square className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
+          )}
           <button
             type="submit"
             disabled={!canSend}

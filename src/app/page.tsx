@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanelLeft, LogIn, Bookmark, Search, AlertCircle } from 'lucide-react';
+import { PanelLeft, LogIn, Bookmark, AlertCircle } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatInput } from '@/components/ChatInput';
 import { ChatMessageBubble } from '@/components/ChatMessageBubble';
@@ -10,6 +10,7 @@ import { PriceComparisonModal } from '@/components/shopping/PriceComparisonModal
 import { SavedLooksDrawer } from '@/components/SavedLooksDrawer';
 import { PreferencesModal } from '@/components/PreferencesModal';
 import { OnboardingModal } from '@/components/OnboardingModal';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { SELECTABLE_CATEGORIES, getCategory, type CategoryId, type PreferenceProfile } from '@/lib/categories';
 import { ChatSession, ChatMessage, ProductMatch, SearchProgressEvent } from '@/types';
 import { useAuth } from '@/lib/supabase/useAuth';
@@ -403,39 +404,31 @@ export default function HomePage() {
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 pt-6 pb-36 space-y-4">
           {currentMessages.length === 0 && !isLoading ? (
             <div className="h-full max-w-2xl mx-auto flex flex-col items-center justify-center text-center px-4 space-y-4 py-12">
-              <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
-                <Search className="w-6 h-6" />
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">What are you shopping for?</h1>
-              <p className="text-sm text-slate-500 max-w-md">
+              {/* Pops in on open: heading, then description, then categories */}
+              <h1 className="siftly-pop text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">What are you shopping for?</h1>
+              <p className="siftly-pop text-sm text-slate-500 max-w-md" style={{ animationDelay: '120ms' }}>
                 Describe what you need and your budget, or paste a screenshot of a product. Siftly finds the best options for you and
                 compares prices and offers across Indian stores.
               </p>
               <div className="flex flex-wrap justify-center gap-2 pt-2">
-                {SELECTABLE_CATEGORIES.map(c => {
+                {SELECTABLE_CATEGORIES.map((c, i) => {
                   const on = selectedCategory === c.id;
                   return (
                     <button
                       key={c.id}
                       onClick={() => setSelectedCategory(on ? null : c.id)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                      aria-pressed={on}
+                      style={{ animationDelay: `${240 + i * 50}ms` }}
+                      className={`siftly-pop px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors flex items-center gap-1.5 ${
                         on ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      {c.emoji} {c.label}
+                      <CategoryIcon id={c.id} className={`w-3.5 h-3.5 ${on ? 'text-white' : 'text-slate-500'}`} />
+                      {c.label}
                     </button>
                   );
                 })}
               </div>
-              {selectedCategory && (
-                <p className="text-xs text-slate-500">
-                  Try: <span className="text-slate-700">“{getCategory(selectedCategory).example}”</span>
-                  {' · '}
-                  <button className="text-blue-600 hover:underline" onClick={() => setIsPrefsOpen(true)}>
-                    set your {getCategory(selectedCategory).label.toLowerCase()} preferences
-                  </button>
-                </p>
-              )}
             </div>
           ) : (
             currentMessages.map(msg => (
