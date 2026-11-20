@@ -288,6 +288,7 @@ Below are REAL Google Shopping listings. Pick the ${ctx.count} best ones for thi
 Rules:
 - Only pick listings that ARE the requested product type. Reject accessories, refills, parts, bundles of a different product, and different categories (a serum is not a toner, a mouse pad is not a mouse).
 - Never pick a listing over budget.
+${ctx.budgetMax ? `- The customer wants the BEST product their budget can buy, not the cheapest. Prefer listings priced in the upper part of the budget (about ₹${Math.round(ctx.budgetMax * 0.6)}–₹${ctx.budgetMax}) when they are better products. Only pick a much cheaper listing if it is clearly better, or if nothing good is in that range.` : ''}
 - Prefer well-known brands with high ratings and many reviews.
 - Prefer listings "sold by multiple stores" and from major Indian stores (Amazon.in, Flipkart, Nykaa, Purplle, Tira, Tata 1mg, Myntra) over small unknown sellers.
 - Each pick must be a DIFFERENT product, ideally from a different brand.
@@ -526,6 +527,11 @@ export async function findProductsOnGoogleShopping(
       eligible = usable(listings);
     }
   }
+  // Budget searches: show the picker the products near the budget first (better products), cheaper ones after
+  if (p.budgetMax) {
+    const band = p.budgetMax * 0.5;
+    eligible = [...eligible.filter(l => (l.price || 0) >= band), ...eligible.filter(l => (l.price || 0) < band)];
+  }
   eligible = eligible.slice(0, 30);
   console.info(`[google-shopping] "${p.shoppingQuery}" (${p.componentName || 'single'}): ${listings.length} listings, ${eligible.length} within budget${p.budgetMax ? ` ≤ ₹${p.budgetMax}` : ''}`);
 
@@ -550,6 +556,22 @@ export async function findProductsOnGoogleShopping(
   );
 
   return buildMatches(p, eligible, picks, listings.length);
+}
+
+/**
+ * Show 3-4 stores the customer can actually buy from: the best deal first, then other in-stock stores by price.
+ * Out-of-stock stores and suspiciously cheap listings are hidden; "stock not confirmed" stores only fill up to 3.
+ */
+export function limitStores(offers: MerchantOffer[], cheapest: MerchantOffer | null, max = 4, min = 3): MerchantOffer[] {
+  const ok = (o: MerchantOffer) => o.priceKnown !== false && !/unusually low/i.test(o.tag || '');
+  const byPrice = (a: MerchantOffer, b: MerchantOffer) => a.price - b.price;
+  const inStock = offers.filter(o => ok(o) && o.availability === 'AVAILABLE' && o !== cheapest).sort(byPrice);
+  const unconfirmed = offers.filter(o => ok(o) && o.availability === 'UNKNOWN' && o !== cheapest).sort(byPrice);
+  const picked: MerchantOffer[] = cheapest ? [cheapest] : [];
+  for (const o of inStock) if (picked.length < max) picked.push(o);
+  for (const o of unconfirmed) if (picked.length < min) picked.push(o);
+  // Nothing buyable at all (e.g. everything out of stock): still show a few so the customer sees the situation
+  return picked.length ? picked : offers.slice(0, min);
 }
 
 /** Turns chosen listings into product cards: store comparison, offers, trusted stores, highlights */
@@ -619,6 +641,7 @@ async function buildMatches(
         const bestTrusted = buyable.filter(o => o.trusted).sort((a, b) => a.price - b.price)[0];
         if (bestTrusted) trustedOffer = { store: bestTrusted.sellerName, price: bestTrusted.price };
       }
+      offers = limitStores(offers, cheapest);
 
       const score = scoreListing(l, p.budgetMax);
       const tier: MatchTier = score.total >= 85 ? 'EXACT' : score.total >= 70 ? 'CLOSE' : 'BUDGET_ALT';

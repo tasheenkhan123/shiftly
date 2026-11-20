@@ -47,27 +47,52 @@ describe('Google Shopping results', () => {
     expect(matches.map(m => m.title)).toEqual(['Minimalist Salicylic Face Wash']);
   });
 
-  it('puts the cheapest in-stock store first and flags suspicious prices', async () => {
+  it('shows 3-4 buyable stores: cheapest in-stock first, no out-of-stock or suspicious ones', async () => {
     fakeSerpApi(
       [{ title: 'Derma Co Face Wash', source: 'Amazon.in', extracted_price: 299, immersive_product_page_token: 't' }],
       { t: [
-        { name: 'Smytten', link: '/goto?url=x', extracted_price: 99, details_and_offers: ['Out of stock online'] },
+        { name: 'Smytten', link: 'https://smytten.com/x', extracted_price: 99, details_and_offers: ['Out of stock online'] },
         { name: 'Nykaa', link: 'http://www.nykaa.com/p', extracted_price: 319, details_and_offers: ['In stock online', '10% off with HDFC cards'] },
         { name: 'Amazon.in', link: 'https://amazon.in/dp/X', extracted_price: 299, details_and_offers: ['In stock online'] },
         { name: 'Cheapo', link: 'https://cheapo.in', extracted_price: 100, details_and_offers: ['In stock online'] },
         { name: 'Bulk Seller', link: 'https://bulk.in', extracted_price: 99999 },
+        { name: 'Myntra', link: '/goto?url=m', extracted_price: 330, details_and_offers: ['In stock online'] },
+        { name: 'Tira', link: 'https://tira.in/p', extracted_price: 340, details_and_offers: ['In stock online'] },
+        { name: 'Purplle', link: 'https://purplle.com/p', extracted_price: 350, details_and_offers: ['In stock online'] },
       ] }
     );
     geminiAnswer.mockResolvedValue({ picks: [{ index: 0, brand: 'The Derma Co', reason: 'x' }] });
     const [m] = (await findProductsOnGoogleShopping({ ...base, shoppingQuery: 'face wash test 2' })).matches;
+    const names = m.merchants.map(o => o.sellerName);
 
-    expect(m.merchants[0].sellerName).toBe('Amazon.in'); // cheapest buyable, not the out-of-stock ₹99
+    expect(names[0]).toBe('Amazon.in'); // cheapest buyable, not the out-of-stock ₹99
     expect(m.lowestPrice).toBe(299);
-    expect(m.merchants.find(o => o.sellerName === 'Cheapo')?.tag).toMatch(/unusually low/i);
-    expect(m.merchants.some(o => o.sellerName === 'Bulk Seller')).toBe(false); // listing error dropped
-    expect(m.merchants.find(o => o.sellerName === 'Smytten')?.productUrl).toMatch(/^https:\/\/www\.google\.co\.in\/goto/);
+    expect(names.length).toBeLessThanOrEqual(4);
+    expect(names.length).toBeGreaterThanOrEqual(3);
+    expect(names).not.toContain('Smytten'); // out of stock: hidden
+    expect(names).not.toContain('Cheapo'); // suspiciously cheap: hidden
+    expect(names).not.toContain('Bulk Seller'); // listing error: dropped
+    expect(m.merchants.every(o => o.availability === 'AVAILABLE')).toBe(true);
     expect(m.merchants.find(o => o.sellerName === 'Nykaa')?.productUrl).toMatch(/^https:/); // http upgraded
     expect(m.merchants.find(o => o.sellerName === 'Nykaa')?.offers).toContain('10% off with HDFC cards');
+    expect(m.merchants.find(o => o.sellerName === 'Myntra')?.productUrl).toMatch(/^https:\/\/www\.google\.co\.in\/goto/);
+  });
+
+  it('shows the products near the budget to the picker first', async () => {
+    fakeSerpApi(
+      [
+        { title: 'Cheap Wash', source: 'Nykaa', extracted_price: 150 },
+        { title: 'Premium Wash', source: 'Nykaa', extracted_price: 480 },
+      ],
+      {}
+    );
+    geminiAnswer.mockImplementation(async (prompt: string) => {
+      expect(prompt.indexOf('Premium Wash')).toBeLessThan(prompt.indexOf('Cheap Wash'));
+      expect(prompt).toMatch(/BEST product their budget can buy/);
+      return { picks: [{ index: 0, brand: 'P', reason: 'x' }] };
+    });
+    const { matches } = await findProductsOnGoogleShopping({ ...base, storeLookups: 0, shoppingQuery: 'budget band test' });
+    expect(matches[0].title).toBe('Premium Wash');
   });
 
   it("accepts a brand's official store even when titles omit the brand", async () => {
