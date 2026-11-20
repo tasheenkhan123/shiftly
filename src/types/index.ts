@@ -201,6 +201,8 @@ export interface ChatMessage {
   isGroundingActive?: boolean;
   configurationNotice?: string;
   isLoading?: boolean;
+  /** How long the search took, shown as "Searched for 18s" */
+  searchSeconds?: number;
 }
 
 export interface ChatSession {

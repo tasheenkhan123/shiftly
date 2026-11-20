@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanelLeft, LogIn, Bookmark, Search, Check, Loader2, AlertCircle } from 'lucide-react';
+import { PanelLeft, LogIn, Bookmark, Search, AlertCircle } from 'lucide-react';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatInput } from '@/components/ChatInput';
 import { ChatMessageBubble } from '@/components/ChatMessageBubble';
@@ -34,6 +34,7 @@ export default function HomePage() {
   const [activeModalProduct, setActiveModalProduct] = useState<ProductMatch | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState<ProgressStep[]>([]);
+  const [searchStartedAt, setSearchStartedAt] = useState(Date.now());
   const [notice, setNotice] = useState<string | null>(null);
   const [profile, setProfile] = useState<PreferenceProfile>({});
   const profileRef = useRef<PreferenceProfile>({});
@@ -235,6 +236,8 @@ export default function HomePage() {
 
     setIsLoading(true);
     setProgress([]);
+    const started = Date.now();
+    setSearchStartedAt(started);
     const targetId = sessionId;
 
     let assistantMsg: ChatMessage;
@@ -297,6 +300,7 @@ export default function HomePage() {
         id: newId('msg_assistant'),
         sender: 'assistant',
         timestamp: nowTime(),
+        searchSeconds: Math.round((Date.now() - started) / 1000),
         text: data.customSummary || 'Here is what I found.',
         analysisResult: data,
         isGroundingActive: data.isGroundingActive,
@@ -461,7 +465,7 @@ export default function HomePage() {
             ))
           )}
 
-          {isLoading && <SearchProgress steps={progress} />}
+          {isLoading && <SearchProgress steps={progress} startedAt={searchStartedAt} />}
           <div ref={messagesEndRef} />
         </div>
 
@@ -526,22 +530,25 @@ export default function HomePage() {
 }
 
 /** Live search steps, streamed from the server */
-function SearchProgress({ steps }: { steps: ProgressStep[] }) {
-  const shown = steps.length ? steps : [{ stage: 'understanding' as const, message: 'Starting search…' }];
+/**
+ * One live "thinking" line that updates in place (like ChatGPT), with a timer.
+ * The text shimmers while the search runs; only the latest step is shown.
+ */
+function SearchProgress({ steps, startedAt }: { steps: ProgressStep[]; startedAt: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const current = steps.length ? steps[steps.length - 1].message : 'Thinking…';
+  const seconds = Math.max(0, Math.round((now - startedAt) / 1000));
   return (
-    <div className="flex items-start gap-2.5 p-4 bg-slate-50 rounded-2xl border border-slate-200 max-w-md">
-      <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">S</div>
-      <ol className="space-y-1.5 text-xs">
-        {shown.map((s, i) => {
-          const current = i === shown.length - 1;
-          return (
-            <li key={i} className={`flex items-center gap-2 ${current ? 'text-slate-800 font-medium' : 'text-slate-400'}`}>
-              {current ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" /> : <Check className="w-3.5 h-3.5 text-emerald-600" />}
-              <span>{s.message}</span>
-            </li>
-          );
-        })}
-      </ol>
+    <div className="flex items-center gap-2.5 px-1 py-2" aria-live="polite">
+      <div className="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">S</div>
+      <span key={current} className="text-sm font-medium siftly-shimmer animate-fade-in">
+        {current}
+      </span>
+      {seconds >= 3 && <span className="text-[11px] text-slate-400 tabular-nums">{seconds}s</span>}
     </div>
   );
 }

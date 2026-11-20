@@ -190,7 +190,7 @@ export async function getProductStores(pageToken: string): Promise<ProductStores
 // Selection: Gemini picks the best N real listings (it never invents products)
 // ---------------------------------------------------------------------------
 
-interface Pick {
+export interface Pick {
   index: number;
   brand: string;
   reason: string;
@@ -399,6 +399,13 @@ export interface GoogleShoppingSearchParams {
   suggestedProducts?: string[];
   /** Plain product type, used to search a named brand's own catalog ("Bath & Body Works fine fragrance mist") */
   productType?: string;
+  /** Already-chosen listings (e.g. from the setup planner): skip searching and picking, just build the cards */
+  preset?: { listings: ShoppingListing[]; picks: Pick[] };
+}
+
+/** Listings we would ever recommend: known price, not an overseas importer */
+export function usableListings(list: ShoppingListing[]): ShoppingListing[] {
+  return list.filter(l => l.price !== null && !FOREIGN_STORE.test(l.source));
 }
 
 function normBrand(b: string): string {
@@ -421,6 +428,7 @@ function matchesBrand(title: string, brands: string[], source = ''): boolean {
 export async function findProductsOnGoogleShopping(
   p: GoogleShoppingSearchParams
 ): Promise<{ matches: ProductMatch[]; listingsFound: number }> {
+  if (p.preset) return buildMatches(p, p.preset.listings, p.preset.picks, p.preset.listings.length);
   const categoryId: CategoryId = p.categoryId || 'other';
   const brandFilter = p.brandFilter || [];
   // When the customer names a specific brand (not a group like K-beauty), search that brand's catalog for the
@@ -495,6 +503,7 @@ export async function findProductsOnGoogleShopping(
     }
   }
   eligible = eligible.slice(0, 30);
+  console.info(`[google-shopping] "${p.shoppingQuery}" (${p.componentName || 'single'}): ${listings.length} listings, ${eligible.length} within budget${p.budgetMax ? ` ≤ ₹${p.budgetMax}` : ''}`);
 
   if (eligible.length === 0) return { matches: [], listingsFound: listings.length };
 
@@ -516,6 +525,17 @@ export async function findProductsOnGoogleShopping(
     p.geminiKey
   );
 
+  return buildMatches(p, eligible, picks, listings.length);
+}
+
+/** Turns chosen listings into product cards: store comparison, offers, trusted stores, highlights */
+async function buildMatches(
+  p: GoogleShoppingSearchParams,
+  eligible: ShoppingListing[],
+  picks: Pick[],
+  listingsFound: number
+): Promise<{ matches: ProductMatch[]; listingsFound: number }> {
+  const categoryId: CategoryId = p.categoryId || 'other';
   p.onProgress?.('comparing', 'Comparing prices and offers across stores…');
   const checkedAt = new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
 
@@ -620,5 +640,5 @@ export async function findProductsOnGoogleShopping(
     })
   );
 
-  return { matches, listingsFound: listings.length };
+  return { matches, listingsFound };
 }

@@ -29,7 +29,14 @@ export interface PersonalizationInput {
 }
 
 export type ProgressFn = (stage: SearchProgressEvent['stage'], message: string) => void;
-import { findProductsOnGoogleShopping, isGoogleShoppingConfigured } from './googleShoppingProvider';
+import {
+  findProductsOnGoogleShopping,
+  isGoogleShoppingConfigured,
+  searchGoogleShopping,
+  usableListings,
+  type Pick as ListingPick,
+  type ShoppingListing,
+} from './googleShoppingProvider';
 
 export interface ConversationTurn {
   sender: 'user' | 'assistant';
@@ -1659,6 +1666,14 @@ export async function searchProductsWithTavilyAndGemini(
   }
 }
 
+/** "face wash under 500" -> "face wash", so headings don't repeat the budget */
+function stripBudgetWords(text: string): string {
+  const out = text
+    .replace(/\s*(under|below|within|less than|upto|up to|for)\s*(rs\.?|inr|₹)?\s*[\d,.]+\s*(k|lakh|lakhs|lac|rs|inr|rupees)?\b/gi, '')
+    .trim();
+  return out || text;
+}
+
 /** "Picked for you" chips: active preferences plus a brand group like K-beauty (without repeating it) */
 function personalTags(parsedIntent: ParsedShoppingIntent): string[] {
   const label = parsedIntent.brandGroupLabel;
@@ -1698,6 +1713,194 @@ function buildBundleSummary(
 
   return (`Here is a **${parsedIntent.cleanTarget}** for ${targetBudgetFormatted}, with up to 3 options per part.\n\n` +
     `Suggested starter set:\n${lines.join('\n')}\n\n${budgetLine}`).trim();
+}
+
+// "Ryzen 5 5600GT" / "8500G" = built-in graphics; RTX / GTX / RX 6600 = dedicated graphics card
+const DEDICATED_GPU = /\b(rtx|gtx)\s?\d{3,4}|\b(rx|radeon rx)\s?\d{3,4}|\barc\s?a\d{3}/i;
+const INTEGRATED = /\bryzen\s?[3579]\s?\d{4}g[et]?\b|\b\d{4}g[et]?\b|\bintel (uhd|iris)\b|integrated graphics|vega\s?\d/i;
+const CPU_SPEC = /\b(i[3579][- ]?\d{4,5}|core\s?(i[3579]|ultra\s?[579])|ryzen\s?[3579]|intel\s?core)/i;
+const NOT_A_PC = /\b(case|cabinet|chassis|motherboard|mother board|cooler|psu|power supply|fan kit|graphics card)\b/i;
+
+/** Is this setup part a whole computer (vs. a monitor, mouse, chair...)? */
+function isComputerPart(name: string): boolean {
+  return /\b(pc|desktop|computer|cpu|tower)\b/i.test(name) && !/mouse|pad|chair|desk(?!top)|keyboard|headset|monitor/i.test(name);
+}
+
+/** A complete PC: names a processor and isn't an empty case, cabinet or motherboard */
+function isCompletePc(title: string): boolean {
+  return CPU_SPEC.test(title) && !NOT_A_PC.test(title.replace(/\b(cabinet|case)\s+(with|\+)/i, ''));
+}
+
+interface PlannedPart {
+  partIndex: number;
+  picks: ListingPick[];
+}
+
+/**
+ * Plans a complete setup from real listings: one main pick per part, plus up to 2 alternatives,
+ * aiming to use 85–100% of the budget on the parts that matter most. The code then enforces the budget.
+ */
+async function planSetup(
+  rawInput: string,
+  parsedIntent: ParsedShoppingIntent,
+  parts: { comp: BundleComponentPlan; listings: ShoppingListing[] }[],
+  totalBudget: number | null,
+  geminiApiKey: string
+): Promise<{ parts: PlannedPart[]; note: string | null; missing: string | null }> {
+  const low = totalBudget ? Math.round(totalBudget * 0.85) : null;
+  const gpuTag = (componentName: string, title: string) => {
+    if (!/pc|desktop|computer|cpu|tower/i.test(componentName)) return '';
+    if (DEDICATED_GPU.test(title)) return ' [dedicated GPU]';
+    if (INTEGRATED.test(title)) return ' [integrated graphics only]';
+    return ' [graphics not stated]';
+  };
+  const partsText = parts
+    .map(
+      (p, pi) =>
+        `PART ${pi}: ${p.comp.componentName}\n` +
+        p.listings
+          .map((l, i) => `  ${i}. ${l.title}${gpuTag(p.comp.componentName, l.title)} | ${l.source} | ₹${l.price} | ${l.rating ?? 'n/a'}★ (${l.reviews ?? 0})`)
+          .join('\n')
+    )
+    .join('\n\n');
+
+  const prompt = `You are an expert building a complete ${parsedIntent.cleanTarget} for a customer in India.
+Customer request: "${rawInput}"
+Total budget: ${totalBudget ? `₹${totalBudget}` : 'not stated (choose sensible good value)'}
+What the customer told us about themselves: ${parsedIntent.activePreferences.join('; ') || 'nothing'}
+
+Below are REAL Google Shopping listings for each part (index | title | store | price | rating).
+Build the BEST possible setup:
+- Choose exactly one "primary" listing per part.
+${totalBudget ? `- The SUM of the primary prices must be between ₹${low} and ₹${totalBudget} (85–100% of the budget). NEVER above ₹${totalBudget}. The customer wants the best they can get for their money, so use the budget.` : ''}
+- Spend most on what matters most for this setup. For GAMING: the PC's dedicated graphics card (NVIDIA RTX / GTX or AMD Radeon RX) matters more than anything else; a PC with only integrated graphics (e.g. Ryzen 8500G/8600G "G" chips, Intel UHD) is a poor gaming choice when a dedicated-GPU PC fits the budget, even if the monitor and peripherals must then be cheaper. Then the monitor (144Hz+); keyboard, mouse and headset modest; chair or desk last.
+- Only pick listings that genuinely are that part (a "Gaming PC" must be a complete desktop PC, not a laptop, case, or single component).
+- Avoid suspicious listings (prices that are far too low for the specs, refurbished, unknown "inspired" brands) and prefer well-known brands and stores.
+- PC listings are tagged [dedicated GPU] / [integrated graphics only] / [graphics not stated]; trust these tags.
+- For each part give up to 3 "alternatives" from the same list: at least one cheaper and one better.
+- If no listing works for a part, set "primary": null for it.
+
+${partsText}
+
+Respond with JSON:
+{"parts":[{"part":number,"primary":number|null,"alternatives":[number],"reason":"one short sentence on why this pick suits the customer, no prices","highlights":["up to 3 key specs of the primary pick"]}],
+ "note":"one short sentence on how you split the budget (e.g. 'Most of the budget goes to an RTX 4060 PC; peripherals are good-value picks'), or null",
+ "missing":"one short sentence if a part could not be filled, else null"}`;
+
+  const parsed = await callGeminiJson<any>(prompt, geminiApiKey, { label: 'setup-plan', totalTimeoutMs: 20000, hedgeAfterMs: 6000 });
+
+  // Turn the answer into validated picks
+  const chosen = new Map<number, { primary: number; alternatives: number[]; reason: string; highlights: string[] }>();
+  const rawParts: any[] = Array.isArray(parsed?.parts) ? parsed.parts : Array.isArray(parsed) ? parsed : [];
+  for (const rp of rawParts) {
+    const pi = Number(rp?.part);
+    const prim = Number(rp?.primary);
+    if (!Number.isInteger(pi) || !parts[pi] || chosen.has(pi)) continue;
+    if (!Number.isInteger(prim) || !parts[pi].listings[prim]) continue;
+    const alts = (Array.isArray(rp.alternatives) ? rp.alternatives : [])
+      .map(Number)
+      .filter((a: number) => Number.isInteger(a) && a !== prim && parts[pi].listings[a])
+      .slice(0, 3);
+    chosen.set(pi, {
+      primary: prim,
+      alternatives: Array.from(new Set(alts)),
+      reason: typeof rp.reason === 'string' ? rp.reason.slice(0, 200) : '',
+      highlights: Array.isArray(rp.highlights) ? rp.highlights.filter((h: unknown) => typeof h === 'string').slice(0, 3) : [],
+    });
+  }
+
+  // Fallback (Gemini unavailable): best-rated listing within each part's proportional share of the budget
+  if (chosen.size === 0) {
+    console.warn('[setup-plan] no usable plan from Gemini; using budget-share fallback');
+    const allocSum = parts.reduce((s2, p) => s2 + (p.comp.allocatedBudget || 0), 0) || 1;
+    parts.forEach((p, pi) => {
+      const share = totalBudget ? (totalBudget * (p.comp.allocatedBudget || allocSum / parts.length)) / allocSum : Infinity;
+      const order = p.listings
+        .map((l, i) => ({ i, price: l.price || 0, score: (l.rating || 3.5) * Math.log10((l.reviews || 1) + 10) }))
+        .filter(x => x.price <= share)
+        .sort((a, b) => b.price - a.price || b.score - a.score);
+      if (order[0]) chosen.set(pi, { primary: order[0].i, alternatives: order.slice(1, 3).map(x => x.i), reason: '', highlights: [] });
+    });
+  }
+
+  let changedByCode = false;
+  // Enforce the budget: swap the most expensive main pick for its cheapest alternative until it fits
+  const priceOf = (pi: number, li: number) => parts[pi].listings[li]?.price || 0;
+  const sum = () => Array.from(chosen.entries()).reduce((t, [pi, c]) => t + priceOf(pi, c.primary), 0);
+  if (totalBudget) {
+    for (let guard = 0; guard < 12 && sum() > totalBudget; guard++) {
+      let best: { pi: number; alt: number; saving: number } | null = null;
+      for (const [pi, c] of chosen) {
+        for (const alt of c.alternatives) {
+          const saving = priceOf(pi, c.primary) - priceOf(pi, alt);
+          if (saving > 0 && (!best || saving > best.saving)) best = { pi, alt, saving };
+        }
+      }
+      if (!best) break;
+      const c = chosen.get(best.pi)!;
+      changedByCode = true;
+      c.alternatives = [c.primary, ...c.alternatives.filter(a => a !== best!.alt)];
+      c.primary = best.alt;
+      c.reason = '';
+      c.highlights = [];
+    }
+    // Under 85%: upgrade parts to their better alternatives, most important part first (planner order),
+    // never going over the budget. Customers asking "under ₹1 lakh" want the best they can get.
+    const floor = totalBudget * 0.85;
+    for (let guard = 0; guard < 12 && sum() < floor; guard++) {
+      let up: { pi: number; alt: number } | null = null;
+      for (const [pi, c] of Array.from(chosen.entries()).sort((a, b) => a[0] - b[0])) {
+        const current = priceOf(pi, c.primary);
+        const headroom = totalBudget - sum();
+        const options = c.alternatives.filter(a => priceOf(pi, a) > current && priceOf(pi, a) - current <= headroom);
+        if (options.length) {
+          // biggest upgrade that still fits
+          const alt = options.sort((a, b) => priceOf(pi, b) - priceOf(pi, a))[0];
+          up = { pi, alt };
+          break;
+        }
+      }
+      if (!up) break;
+      const c = chosen.get(up.pi)!;
+      changedByCode = true;
+      c.alternatives = [c.primary, ...c.alternatives.filter(a => a !== up!.alt)];
+      c.primary = up.alt;
+      c.reason = '';
+      c.highlights = [];
+    }
+    // Still over: drop the least important parts (planned last) until it fits
+    const order = Array.from(chosen.keys()).sort((a, b) => b - a);
+    for (const pi of order) {
+      if (sum() <= totalBudget || chosen.size <= 1) break;
+      console.warn(`[setup-plan] dropping ${parts[pi].comp.componentName} to stay within budget`);
+      changedByCode = true;
+      chosen.delete(pi);
+    }
+  }
+
+  const planned: PlannedPart[] = Array.from(chosen.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([pi, c]) => {
+      const mainPrice = priceOf(pi, c.primary);
+      const picks: ListingPick[] = [
+        { index: c.primary, brand: '', reason: c.reason, fitsYou: [], highlights: c.highlights },
+        ...c.alternatives.map(a => ({
+          index: a,
+          brand: '',
+          reason: priceOf(pi, a) < mainPrice ? 'Cheaper option for this part' : 'Upgrade option if you can spend a little more',
+          fitsYou: [],
+          highlights: [],
+        })),
+      ];
+      return { partIndex: pi, picks };
+    });
+
+  return {
+    parts: planned,
+    // Gemini's note describes its own picks; drop it if the code had to change them
+    note: !changedByCode && typeof parsed?.note === 'string' && parsed.note.trim() ? parsed.note.trim().slice(0, 220) : null,
+    missing: typeof parsed?.missing === 'string' && parsed.missing.trim() ? parsed.missing.trim().slice(0, 200) : null,
+  };
 }
 
 /**
@@ -1759,43 +1962,94 @@ async function runGoogleShoppingFlow(
   });
 
   // ---- Setup / bundle ----
+  // Search every part first, then plan the whole setup from REAL prices in one Gemini call.
+  // (Planning from memory failed: Gemini allotted ₹60k for an RTX gaming PC, but real ones start near ₹80k,
+  // so the PC was dropped and a ₹1 lakh setup came to ₹14,607.)
   if (parsedIntent.isBundleOrSetup && parsedIntent.bundleComponents && parsedIntent.bundleComponents.length > 0) {
-    const comps = parsedIntent.bundleComponents.slice(0, 5);
+    const comps = parsedIntent.bundleComponents.slice(0, 6);
+    const totalBudget = parsedIntent.totalBudget || parsedIntent.budgetMax || null;
     onProgress('searching', `Searching Google Shopping for ${comps.length} parts: ${comps.map(c => c.componentName).join(', ')}…`);
-    const results = await Promise.allSettled(
-      comps.map(async (comp, i) => {
+
+    const isGaming = /gaming|gamer|game/i.test(`${rawInput} ${parsedIntent.cleanTarget}`);
+    const searched = await Promise.allSettled(
+      comps.map(async c => {
+        const main = await searchGoogleShopping((c.shoppingQuery && c.shoppingQuery.trim()) || c.componentName);
+        if (!isComputerPart(c.componentName)) return main;
+        // Make sure real prebuilt PCs (with graphics cards, for gaming) are in the list, not just cases/parts
+        const extra = await searchGoogleShopping(isGaming ? 'prebuilt gaming pc rtx desktop' : 'desktop pc').catch(() => []);
+        const seen = new Set(main.map(l => l.title.toLowerCase()));
+        return [...main, ...extra.filter(l => !seen.has(l.title.toLowerCase()))];
+      })
+    );
+    const parts = comps.map((comp, i) => {
+      const r = searched[i];
+      let listings = r.status === 'fulfilled' ? usableListings(r.value) : [];
+      if (r.status === 'rejected') console.warn(`[setup] search failed for ${comp.componentName}:`, r.reason?.message);
+      if (isComputerPart(comp.componentName)) {
+        // Code decides, not the model: whole PCs only, and for gaming only dedicated graphics when affordable
+        listings = listings.filter(l => isCompletePc(l.title));
+        if (isGaming) {
+          const affordable = (l: ShoppingListing) => !totalBudget || (l.price || 0) <= totalBudget * 0.9;
+          const dedicated = listings.filter(l => DEDICATED_GPU.test(l.title) && affordable(l));
+          if (dedicated.length) listings = [...dedicated, ...listings.filter(l => DEDICATED_GPU.test(l.title) && !affordable(l))];
+        }
+        listings = listings.sort((a, b) => (a.price || 0) - (b.price || 0));
+        console.info(`[setup] ${comp.componentName}: ${listings.length} complete PCs${isGaming ? ' (dedicated GPU preferred)' : ''}`);
+      }
+      return { comp, listings: listings.slice(0, 18) };
+    });
+    const searchable = parts.filter(p => p.listings.length > 0);
+    if (searchable.length === 0) return null;
+
+    onProgress('choosing', `Planning the best setup${totalBudget ? ` within ₹${totalBudget.toLocaleString('en-IN')}` : ''}…`);
+    const plan = await planSetup(rawInput, parsedIntent, searchable, totalBudget, geminiApiKey);
+
+    onProgress('comparing', 'Comparing prices and offers across stores…');
+    const built = await Promise.allSettled(
+      plan.parts.map(async (pp, i) => {
         const id = `entity_comp_${i}_${Date.now()}`;
-        const q = (comp.shoppingQuery && comp.shoppingQuery.trim()) || comp.componentName;
+        const { comp, listings } = searchable[pp.partIndex];
         const { matches } = await findProductsOnGoogleShopping({
           ...base,
-          onProgress: undefined, // one combined progress message for setups instead of one per part
-          shoppingQuery: q,
+          onProgress: undefined,
+          shoppingQuery: comp.shoppingQuery || comp.componentName,
           target: comp.componentName,
-          budgetMax: comp.allocatedBudget || null,
-          count: 3,
+          budgetMax: null,
+          count: pp.picks.length,
           entityId: id,
           componentName: comp.componentName,
-          allocatedBudget: comp.allocatedBudget,
-          storeLookups: 1, // only the top pick per part gets a full store comparison, to save API calls
+          storeLookups: 1, // full store comparison for this part's main pick only, to save API calls
+          preset: { listings, picks: pp.picks },
         });
-        return { entity: makeEntity(id, comp.componentName, q), matches };
+        return { entity: makeEntity(id, comp.componentName, comp.shoppingQuery || comp.componentName), matches };
       })
     );
     const entities: DetectedEntity[] = [];
     const matches: Record<string, ProductMatch[]> = {};
-    for (const r of results) {
+    for (const r of built) {
       if (r.status === 'fulfilled' && r.value.matches.length > 0) {
         entities.push(r.value.entity);
         matches[r.value.entity.id] = r.value.matches;
       } else if (r.status === 'rejected') {
-        console.warn('[google-shopping] component search failed:', r.reason?.message);
+        console.warn('[setup] building part failed:', r.reason?.message);
       }
     }
     if (entities.length === 0) return null;
-    const budgetStr = parsedIntent.totalBudget ? `₹${parsedIntent.totalBudget.toLocaleString('en-IN')}` : 'your budget';
+
+    // Real total of the main picks (after store comparison may have found cheaper stores)
+    const total = Math.round(entities.reduce((sum, e) => sum + (matches[e.id]?.[0]?.lowestPrice || 0), 0));
+    const budgetStr = totalBudget ? ` for ₹${totalBudget.toLocaleString('en-IN')}` : '';
+    const leftStr = totalBudget && total <= totalBudget ? ` (₹${(totalBudget - total).toLocaleString('en-IN')} left)` : '';
+    const missing = parts.filter(p => p.listings.length === 0).map(p => p.comp.componentName);
+    const notes = [plan.note, plan.missing, missing.length ? `Couldn't find listings for: ${missing.join(', ')}.` : null]
+      .filter(Boolean)
+      .join(' ');
+
+    const result = resultBase(entities, matches, comps.map(c => c.shoppingQuery || c.componentName));
+    result.assumptions = notes || result.assumptions;
     return {
-      result: resultBase(entities, matches, comps.map(c => c.shoppingQuery || c.componentName)),
-      assistantSummary: buildBundleSummary(parsedIntent, entities, matches, budgetStr),
+      result,
+      assistantSummary: `Best **${stripBudgetWords(parsedIntent.cleanTarget)}**${budgetStr}: total **₹${total.toLocaleString('en-IN')}**${leftStr}`,
       isGroundingActive: true,
     };
   }
@@ -1830,7 +2084,7 @@ async function runGoogleShoppingFlow(
   // the assumption note and the follow-up question from the result fields.
   const seen = parsedIntent.imageDescription ? `In your image I can see: ${parsedIntent.imageDescription}\n\n` : '';
   // Drop budget words from the target so the heading doesn't say "under 3000 under ₹3,000"
-  const target = parsedIntent.cleanTarget.replace(/\s*(under|below|within|less than|upto|up to)\s*(rs\.?|inr|₹)?\s*[\d,.]+\s*(k|rs|inr|rupees)?\b/gi, '').trim() || parsedIntent.cleanTarget;
+  const target = stripBudgetWords(parsedIntent.cleanTarget);
   const summary = `${seen}Top ${matches.length} **${target}**${budgetStr}`;
 
   return {

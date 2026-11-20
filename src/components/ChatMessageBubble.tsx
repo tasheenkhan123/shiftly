@@ -91,6 +91,9 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           </div>
           <span className="text-xs font-bold text-slate-800">Siftly Search Assistant</span>
           <span className="text-[10px] text-slate-400">• {message.timestamp}</span>
+          {typeof message.searchSeconds === 'number' && (
+            <span className="text-[10px] text-slate-400">• Searched for {message.searchSeconds}s</span>
+          )}
         </div>
 
         {/* Assistant Message Content Container */}
