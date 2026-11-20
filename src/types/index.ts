@@ -73,6 +73,8 @@ export interface MerchantOffer {
   priceKnown?: boolean;
   /** Offer text from the store listing, e.g. "10% off with HDFC cards", "Free delivery" */
   offers?: string[];
+  /** Well-known store for this category (Nykaa for beauty, Croma for electronics...) */
+  trusted?: boolean;
   discountLabel?: string;
   tag?: string;
   paymentMethods?: string;
@@ -113,6 +115,10 @@ export interface ProductMatch {
   whyPicked?: string;
   /** Where the data came from, e.g. "Google Shopping" or "Web search" */
   dataSource?: string;
+  /** Short reasons this product suits the user, e.g. "Oily skin: has salicylic acid" */
+  fitsYou?: string[];
+  /** When the cheapest store isn't a well-known one: the best price at a trusted store */
+  trustedOffer?: { store: string; price: number };
 }
 
 export interface UserConstraints {
@@ -154,6 +160,13 @@ export interface SiftlyAnalysisResult {
   searchQueries?: string[];
   groundingSources?: GroundingSource[];
   configurationNotice?: string;
+  /** Personalisation (see src/lib/categories.ts) */
+  categoryId?: string;
+  /** Preferences the user stated in this search, to save to their profile */
+  learnedPreferences?: Record<string, string>;
+  /** Preferences that shaped this search, human readable */
+  activePreferences?: string[];
+  assumptions?: string;
 }
 
 export interface ExternalWebResult {

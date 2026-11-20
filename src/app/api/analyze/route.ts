@@ -1,6 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseUserConstraints } from '@/lib/ai/constraints';
 import { searchProductsWithTavilyAndGemini, type ConversationTurn } from '@/lib/search/tavilyShoppingPipeline';
+import { CATEGORIES, type CategoryId, type PreferenceProfile } from '@/lib/categories';
+
+/** Accept only { scope: { key: shortString } } so the profile can't be used to stuff the prompt */
+function sanitizeProfile(raw: unknown): PreferenceProfile {
+  const out: PreferenceProfile = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const scopes = new Set<string>([...CATEGORIES.map(c => c.id), 'global']);
+  for (const [scope, values] of Object.entries(raw as Record<string, unknown>)) {
+    if (!scopes.has(scope) || !values || typeof values !== 'object') continue;
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(values as Record<string, unknown>).slice(0, 12)) {
+      if (/^[a-zA-Z]{1,24}$/.test(k) && typeof v === 'string' && v.trim() && v.length <= 80) clean[k] = v.trim();
+    }
+    if (Object.keys(clean).length) out[scope as keyof PreferenceProfile] = clean;
+  }
+  return out;
+}
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -45,6 +62,9 @@ export async function POST(req: NextRequest) {
       }))
     : [];
 
+  const profile = sanitizeProfile(body?.profile);
+  const categoryHint = CATEGORIES.some(c => c.id === body?.category) ? (body.category as CategoryId) : undefined;
+
   const effectiveQuery = input.trim() || 'Find the product in this image';
   const constraints = parseUserConstraints(effectiveQuery);
 
@@ -64,7 +84,8 @@ export async function POST(req: NextRequest) {
           image,
           constraints,
           history,
-          (stage, message) => send({ type: 'progress', stage, message })
+          (stage, message) => send({ type: 'progress', stage, message }),
+          { profile, categoryHint }
         );
         // Don't echo the (large) image back; the page already has it
         const { mediaPreviewUrl: _omit, ...result } = search.result;

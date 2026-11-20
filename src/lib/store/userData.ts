@@ -9,6 +9,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ChatSession, ProductMatch } from '@/types';
+import type { PreferenceProfile } from '@/lib/categories';
 
 export interface UserDataStore {
   kind: 'cloud' | 'local';
@@ -18,6 +19,19 @@ export interface UserDataStore {
   listSaved(): Promise<ProductMatch[]>;
   saveProduct(product: ProductMatch): Promise<void>;
   removeSaved(product: ProductMatch): Promise<void>;
+  getProfile(): Promise<PreferenceProfile>;
+  saveProfile(profile: PreferenceProfile): Promise<void>;
+}
+
+/** Merge newly learned preferences into a category of the profile (new values win; empty values are removed) */
+export function mergeProfile(profile: PreferenceProfile, categoryId: string, learned: Record<string, string>): PreferenceProfile {
+  const key = categoryId as keyof PreferenceProfile;
+  const next: Record<string, string> = { ...(profile[key] || {}) };
+  for (const [k, v] of Object.entries(learned)) {
+    if (v && v.trim()) next[k] = v.trim();
+    else delete next[k];
+  }
+  return { ...profile, [key]: next };
 }
 
 /** Same physical product = same key, even across different searches (product.id changes per search). */
@@ -37,6 +51,7 @@ export function sortSessions(list: ChatSession[]): ChatSession[] {
 // ---------------------------------------------------------------------------
 const LS_SESSIONS = 'siftly_sessions';
 const LS_SAVED = 'siftly_saved_products';
+const LS_PROFILE = 'siftly_profile';
 const MAX_LOCAL_SESSIONS = 30;
 
 function readLS<T>(key: string, fallback: T): T {
@@ -89,6 +104,12 @@ export const localStore: UserDataStore = {
     const key = productKey(product);
     writeLS(LS_SAVED, readLS<ProductMatch[]>(LS_SAVED, []).filter(p => productKey(p) !== key));
   },
+  async getProfile() {
+    return readLS<PreferenceProfile>(LS_PROFILE, {});
+  },
+  async saveProfile(profile) {
+    writeLS(LS_PROFILE, profile);
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -98,7 +119,8 @@ export function cloudStore(sb: SupabaseClient): UserDataStore {
   const fail = (what: string, error: { message: string; code?: string } | null) => {
     if (!error) return;
     // 42501 = missing table permissions, 42P01 = table doesn't exist: the SQL setup hasn't been (fully) run
-    if (error.code === '42501' || error.code === '42P01' || /permission denied|does not exist/i.test(error.message)) {
+    // PGRST205 = table not found in the API schema cache (e.g. user_profiles before the new SQL is run)
+    if (['42501', '42P01', 'PGRST205'].includes(error.code || '') || /permission denied|does not exist|schema cache/i.test(error.message)) {
       throw new Error(
         `${what} failed: the Supabase database isn't fully set up. Run supabase/schema.sql in the Supabase SQL Editor, then refresh.`
       );
@@ -158,6 +180,19 @@ export function cloudStore(sb: SupabaseClient): UserDataStore {
       const { error } = await sb.from('saved_products').delete().eq('product_key', productKey(product));
       fail('Removing saved item', error);
     },
+    async getProfile() {
+      const { data, error } = await sb.from('user_profiles').select('preferences').maybeSingle();
+      fail('Loading your preferences', error);
+      return (data?.preferences as PreferenceProfile) || {};
+    },
+    async saveProfile(profile) {
+      const { data: auth } = await sb.auth.getUser();
+      if (!auth.user) return;
+      const { error } = await sb
+        .from('user_profiles')
+        .upsert({ user_id: auth.user.id, preferences: profile, updated_at: new Date().toISOString() });
+      fail('Saving your preferences', error);
+    },
   };
 }
 
@@ -165,12 +200,22 @@ export function cloudStore(sb: SupabaseClient): UserDataStore {
 export async function migrateLocalToCloud(cloud: UserDataStore): Promise<number> {
   const sessions = (await localStore.listSessions()).filter(s => s.messages.length > 0);
   const saved = await localStore.listSaved();
-  if (sessions.length === 0 && saved.length === 0) return 0;
+  const localProfile = await localStore.getProfile();
+  const hasProfile = Object.values(localProfile).some(v => v && Object.keys(v).length > 0);
+  if (sessions.length === 0 && saved.length === 0 && !hasProfile) return 0;
   for (const s of sessions) await cloud.upsertSession(s);
   for (const p of saved) await cloud.saveProduct(p);
+  if (hasProfile) {
+    // Account values win over guest values if both exist
+    const cloudProfile = await cloud.getProfile();
+    const merged: PreferenceProfile = { ...localProfile };
+    for (const [k, v] of Object.entries(cloudProfile)) merged[k as keyof PreferenceProfile] = { ...(localProfile[k as keyof PreferenceProfile] || {}), ...(v || {}) };
+    await cloud.saveProfile(merged);
+  }
   try {
     localStorage.removeItem(LS_SESSIONS);
     localStorage.removeItem(LS_SAVED);
+    localStorage.removeItem(LS_PROFILE);
   } catch {}
   return sessions.length + saved.length;
 }

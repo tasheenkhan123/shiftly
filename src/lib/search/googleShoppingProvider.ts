@@ -12,6 +12,7 @@
 
 import { MatchTier, MerchantOffer, ProductMatch } from '@/types';
 import { callGeminiJson } from '@/lib/ai/gemini';
+import { getCategory, isTrustedStore, type CategoryId } from '@/lib/categories';
 
 // ---------------------------------------------------------------------------
 // Small in-memory cache: repeat searches are instant and don't spend SerpApi credits.
@@ -191,6 +192,7 @@ interface Pick {
   index: number;
   brand: string;
   reason: string;
+  fitsYou?: string[];
 }
 
 function normTitle(t: string): string {
@@ -221,9 +223,20 @@ function fallbackPicks(listings: ShoppingListing[], count: number): Pick[] {
 
 async function pickBestListings(
   listings: ShoppingListing[],
-  ctx: { userRequest: string; target: string; budgetMax: number | null; count: number; preferences: string[] },
+  ctx: {
+    userRequest: string;
+    target: string;
+    budgetMax: number | null;
+    count: number;
+    preferences: string[];
+    categoryId: CategoryId;
+    userPreferences: string[];
+    brandFilter: string[];
+    brandGroupLabel?: string;
+  },
   geminiKey: string
 ): Promise<Pick[]> {
+  const cat = getCategory(ctx.categoryId);
   const lines = listings
     .map(
       (l, i) =>
@@ -237,7 +250,10 @@ async function pickBestListings(
 Customer request: "${ctx.userRequest}"
 They want: ${ctx.target}
 Budget per item: ${ctx.budgetMax ? `up to ₹${ctx.budgetMax}` : 'not specified'}
-Preferences: ${ctx.preferences.length ? ctx.preferences.join(', ') : 'none stated'}
+What this customer told us about themselves: ${ctx.userPreferences.length ? ctx.userPreferences.join('; ') : 'nothing yet'}
+Other preferences for this search: ${ctx.preferences.length ? ctx.preferences.join(', ') : 'none'}
+${ctx.brandFilter.length ? `Brands: the customer wants ${ctx.brandGroupLabel || 'specific'} brands only (${ctx.brandFilter.slice(0, 20).join(', ')}). Reject other brands.\n` : ''}
+${cat.guidance}
 
 Below are REAL Google Shopping listings. Pick the ${ctx.count} best ones for this customer.
 Rules:
@@ -246,13 +262,15 @@ Rules:
 - Prefer well-known brands with high ratings and many reviews.
 - Prefer listings "sold by multiple stores" and from major Indian stores (Amazon.in, Flipkart, Nykaa, Purplle, Tira, Tata 1mg, Myntra) over small unknown sellers.
 - Each pick must be a DIFFERENT product, ideally from a different brand.
-- Respect the stated preferences.
+- PERSONALISE: choose products that genuinely suit what the customer told us about themselves (skin type, size, use, scent, etc.), using the expertise above and well-known facts about these products. A popular product that does not suit them is a worse pick than a slightly less popular one that does.
 - If fewer than ${ctx.count} listings qualify, return fewer. Do not pad.
+- Never use a size (e.g. "UK 9", "M") as a fitsYou tag: we cannot confirm a size is in stock.
+- In reasons, never claim the customer asked for something they did not say (no "the matte finish you requested" unless they asked for matte).
 
 Listings:
 ${lines}
 
-Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one short sentence on why it suits this customer (brand reputation, rating, key feature). Do NOT mention any price or store name, because prices are shown separately and differ per store."}]}`;
+Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one short sentence on why it suits THIS customer, tied to what they told us when relevant (e.g. 'Gel texture with salicylic acid that controls oil without drying'). Do NOT mention any price or store name, because prices are shown separately and differ per store.","fitsYou":["up to 3 very short tags linking the product to the customer, e.g. 'Oily skin: oil-free gel', 'K-beauty'. Use [] if the customer told us nothing."]}]}`;
 
   const parsed = await callGeminiJson<{ picks?: Pick[] }>(prompt, geminiKey, { label: 'shopping-pick', totalTimeoutMs: 14000 });
   // Gemini returns either {"picks":[...]} or a bare [...] array
@@ -263,7 +281,10 @@ Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one 
     const index = Number(p?.index); // Gemini sometimes returns "3" instead of 3
     if (!Number.isInteger(index) || index < 0 || index >= listings.length || seen.has(index)) continue;
     seen.add(index);
-    unique.push({ index, brand: str(p.brand) || '', reason: str(p.reason) || '' });
+    const fitsYou = Array.isArray(p.fitsYou)
+      ? p.fitsYou.filter((x: unknown): x is string => typeof x === 'string' && x.trim().length > 0).map((x: string) => x.trim().slice(0, 48)).slice(0, 3)
+      : [];
+    unique.push({ index, brand: str(p.brand) || '', reason: str(p.reason) || '', fitsYou });
     if (unique.length === ctx.count) break;
   }
   if (unique.length === 0) {
@@ -357,28 +378,87 @@ export interface GoogleShoppingSearchParams {
   storeLookups: number;
   geminiKey: string;
   onProgress?: (stage: 'choosing' | 'comparing', message: string) => void;
+  /** Personalisation */
+  categoryId?: CategoryId;
+  userPreferences?: string[];
+  /** Only these brands (explicit, or expanded from a group like K-beauty) */
+  brandFilter?: string[];
+  brandGroupLabel?: string;
+}
+
+function normBrand(b: string): string {
+  return b.toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** Does this listing belong to one of the brands? (title starts with / contains the brand name) */
+function matchesBrand(title: string, brands: string[]): boolean {
+  const t = ` ${normBrand(title)} `;
+  return brands.some(b => {
+    const nb = normBrand(b);
+    return nb.length >= 2 && t.includes(` ${nb} `);
+  });
 }
 
 export async function findProductsOnGoogleShopping(
   p: GoogleShoppingSearchParams
 ): Promise<{ matches: ProductMatch[]; listingsFound: number }> {
-  const listings = await searchGoogleShopping(p.shoppingQuery, { maxPrice: p.budgetMax });
+  const categoryId: CategoryId = p.categoryId || 'other';
+  const brandFilter = p.brandFilter || [];
+  let listings = await searchGoogleShopping(p.shoppingQuery, { maxPrice: p.budgetMax });
 
   const excluded = p.excludeTitles.map(normTitle).filter(Boolean);
-  const eligible = listings
-    .filter(l => !p.budgetMax || (l.price !== null && l.price <= p.budgetMax))
-    .filter(l => {
-      const t = normTitle(l.title);
-      return !excluded.some(ex => t.includes(ex) || ex.includes(t));
-    })
-    .slice(0, 30);
+  const usable = (list: ShoppingListing[]) =>
+    list
+      .filter(l => !p.budgetMax || (l.price !== null && l.price <= p.budgetMax))
+      .filter(l => {
+        const t = normTitle(l.title);
+        return !excluded.some(ex => t.includes(ex) || ex.includes(t));
+      })
+      .filter(l => brandFilter.length === 0 || matchesBrand(l.title, brandFilter));
+
+  let eligible = usable(listings);
+
+  // Brand-restricted searches (e.g. "K-beauty") often return few matching listings from a generic query.
+  // Search the top brands directly, at most 2 extra searches (cached, so repeats are free).
+  if (brandFilter.length > 0 && eligible.length < p.count * 2) {
+    const present = new Set(eligible.map(l => brandFilter.find(b => matchesBrand(l.title, [b]))).filter(Boolean));
+    const productWords = p.target.replace(/k-?\s?beauty|korean|japanese|j-beauty|indian brands?|brands?/gi, '').trim() || p.target;
+    const extraBrands = brandFilter.filter(b => !present.has(b)).slice(0, 2);
+    if (extraBrands.length) {
+      p.onProgress?.('choosing', `Checking ${extraBrands.join(' and ')} too…`);
+      const extra = await Promise.allSettled(extraBrands.map(b => searchGoogleShopping(`${b} ${productWords}`, { maxPrice: p.budgetMax })));
+      const seen = new Set(listings.map(l => normTitle(l.title)));
+      for (const r of extra) {
+        if (r.status !== 'fulfilled') continue;
+        for (const l of r.value) {
+          const key = normTitle(l.title);
+          if (!seen.has(key)) {
+            seen.add(key);
+            listings = [...listings, l];
+          }
+        }
+      }
+      eligible = usable(listings);
+    }
+  }
+  eligible = eligible.slice(0, 30);
 
   if (eligible.length === 0) return { matches: [], listingsFound: listings.length };
 
   p.onProgress?.('choosing', `Found ${eligible.length} listings. Choosing the best ${p.count}…`);
   const picks = await pickBestListings(
     eligible,
-    { userRequest: p.userRequest, target: p.target, budgetMax: p.budgetMax, count: p.count, preferences: p.preferences },
+    {
+      userRequest: p.userRequest,
+      target: p.target,
+      budgetMax: p.budgetMax,
+      count: p.count,
+      preferences: p.preferences,
+      categoryId,
+      userPreferences: p.userPreferences || [],
+      brandFilter,
+      brandGroupLabel: p.brandGroupLabel,
+    },
     p.geminiKey
   );
 
@@ -405,6 +485,7 @@ export async function findProductsOnGoogleShopping(
         }
       }
       if (offers.length === 0) offers = [listingToOffer(l, checkedAt)];
+      for (const o of offers) o.trusted = isTrustedStore(o.sellerName, categoryId);
 
       // Buyable first (in stock, then unconfirmed, then out of stock), cheapest first within each group
       const rank = (o: MerchantOffer) =>
@@ -434,6 +515,12 @@ export async function findProductsOnGoogleShopping(
       }
       const lowest = cheapest?.price ?? l.price ?? 0;
       const priceKnown = Boolean(cheapest) || l.price !== null;
+      // If the cheapest store isn't a well-known one, also point out the best price at a trusted store
+      let trustedOffer: ProductMatch['trustedOffer'];
+      if (cheapest && !cheapest.trusted) {
+        const bestTrusted = buyable.filter(o => o.trusted).sort((a, b) => a.price - b.price)[0];
+        if (bestTrusted) trustedOffer = { store: bestTrusted.sellerName, price: bestTrusted.price };
+      }
 
       const score = scoreListing(l, p.budgetMax);
       const tier: MatchTier = score.total >= 85 ? 'EXACT' : score.total >= 70 ? 'CLOSE' : 'BUDGET_ALT';
@@ -453,6 +540,8 @@ export async function findProductsOnGoogleShopping(
         matchScore: score.total,
         matchReasons: [pick.reason || 'Listed on Google Shopping', `Price from Google Shopping, checked ${checkedAt}`],
         whyPicked: pick.reason || undefined,
+        fitsYou: pick.fitsYou && pick.fitsYou.length ? pick.fitsYou : undefined,
+        trustedOffer,
         scoreBreakdown: {
           visualSimilarity: 0,
           brandMatch: brand ? 100 : 50,

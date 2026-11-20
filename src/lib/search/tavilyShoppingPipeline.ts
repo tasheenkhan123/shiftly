@@ -10,6 +10,21 @@ import {
 import { extractBrand } from '../ai/constraints';
 import { callGeminiJson, imagePartFromDataUrl } from '../ai/gemini';
 import type { SearchProgressEvent } from '@/types';
+import {
+  CATEGORIES,
+  findBrandGroups,
+  getCategory,
+  describePreferences,
+  type CategoryId,
+  type PreferenceProfile,
+} from '@/lib/categories';
+
+export interface PersonalizationInput {
+  /** Category chip the user selected, if any */
+  categoryHint?: CategoryId;
+  /** The user's saved preference profile */
+  profile?: PreferenceProfile;
+}
 
 export type ProgressFn = (stage: SearchProgressEvent['stage'], message: string) => void;
 import { findProductsOnGoogleShopping, isGoogleShoppingConfigured } from './googleShoppingProvider';
@@ -45,6 +60,17 @@ export interface ParsedShoppingIntent {
   excludedProductTitles?: string[];
   /** What Gemini saw in the uploaded screenshot, if any */
   imageDescription?: string | null;
+  /** Personalisation */
+  categoryId: CategoryId;
+  /** Preferences stated in this conversation, to remember in the user's profile */
+  learnedPreferences: Record<string, string>;
+  /** Saved + newly stated preferences that apply to this search, human readable */
+  activePreferences: string[];
+  /** Brands the results must come from (explicit brands or expanded groups like K-beauty) */
+  brandFilter: string[];
+  brandGroupLabel?: string;
+  /** Assumptions Siftly made, e.g. "₹3,000 treated as the budget per product" */
+  assumptions?: string | null;
 }
 
 export interface ExtractedProductCandidate {
@@ -435,9 +461,16 @@ export async function understandShoppingQuery(
   geminiApiKey: string,
   constraints?: UserConstraints,
   conversationHistory?: ConversationTurn[],
-  imageDataUrl?: string
+  imageDataUrl?: string,
+  personal: PersonalizationInput = {}
 ): Promise<ParsedShoppingIntent> {
   const image = imagePartFromDataUrl(imageDataUrl);
+  const profileText = personal.profile && Object.keys(personal.profile).length
+    ? JSON.stringify(personal.profile)
+    : 'none saved';
+  const categoryFieldsText = CATEGORIES.filter(c => c.preferenceFields.length)
+    .map(c => `- ${c.id}: ${c.preferenceFields.map(f => f.key + (f.options ? ` (${f.options.join('/')})` : '')).join(', ')}`)
+    .join('\n');
   // Format conversational context
   let historyText = '';
   if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
@@ -459,6 +492,10 @@ export async function understandShoppingQuery(
 Your goal is to understand what the customer ACTUALLY wants to accomplish, taking into account their intent, context, purpose, constraints, preferences, and implied requirements.
 
 User Query: "${rawInput}"
+${personal.categoryHint ? `The customer selected the category: ${personal.categoryHint}.\n` : ''}
+CUSTOMER PROFILE (preferences saved from earlier chats, JSON by category): ${profileText}
+- Apply saved preferences that are relevant to this request (e.g. saved skinType for any skincare search, saved shoeSize for footwear).
+- Anything the customer says now overrides the saved profile.
 ${image ? `
 AN IMAGE IS ATTACHED (a screenshot or photo from the customer). Look at it carefully:
 - Identify the main product shown: brand (read any logo or label text), exact product name/model, product type, colour, size/variant.
@@ -526,8 +563,21 @@ Output strictly valid JSON matching this schema:
   "clarificationQuestion": string or null,
   "appliedPreferences": ["preference1", "preference2"],
   "excludedProductTitles": ["title1", "title2"],
-  "imageDescription": "what the attached image shows, or null if no image"
-}`;
+  "imageDescription": "what the attached image shows, or null if no image",
+  "categoryId": "one of: skincare | makeup | footwear | fashion | electronics | perfumes | other",
+  "preferences": { "fieldKey": "value" },
+  "assumptions": "one short sentence about any important assumption you made (e.g. 'I treated ₹3,000 as the budget for each product'), or null"
+}
+
+PREFERENCES TO REMEMBER ("preferences"):
+- Only include facts the customer stated about THEMSELVES in this conversation (not the saved profile, not guesses).
+- Use these field keys for the chosen categoryId:
+${categoryFieldsText}
+- Example: "I have oily skin and hate fragrance" -> {"skinType":"Oily","avoid":"Fragrance"}. "size 9 running shoes" -> {"shoeSize":"UK 9","use":"Running"}.
+- Use {} if nothing personal was stated.
+
+BUDGET SCOPE:
+- "under 3000" for one product type = per product. For a routine/setup/"products" plural without a clear per-item meaning, decide sensibly and explain the choice in "assumptions".`;
 
   const parsed = await callGeminiJson<any>(prompt, geminiApiKey, { label: 'intent', hedgeAfterMs: image ? 6000 : 4000, totalTimeoutMs: 16000, image });
   if (parsed && typeof parsed === 'object') {
@@ -556,7 +606,8 @@ Output strictly valid JSON matching this schema:
       clarificationQuestion: parsed.clarificationQuestion || null,
       appliedPreferences: Array.isArray(parsed.appliedPreferences) ? parsed.appliedPreferences : [],
       excludedProductTitles: Array.isArray(parsed.excludedProductTitles) ? parsed.excludedProductTitles : [],
-      imageDescription: typeof parsed.imageDescription === 'string' ? parsed.imageDescription : null
+      imageDescription: typeof parsed.imageDescription === 'string' ? parsed.imageDescription : null,
+      ...personalise(parsed, rawInput, conversationHistory, personal),
     };
   }
 
@@ -578,7 +629,55 @@ Output strictly valid JSON matching this schema:
     needsClarification: false,
     clarificationQuestion: null,
     appliedPreferences: [],
-    excludedProductTitles: []
+    excludedProductTitles: [],
+    ...personalise({}, rawInput, conversationHistory, personal),
+  };
+}
+
+/** Category, remembered preferences, brand filter (incl. groups like K-beauty) and assumptions */
+function personalise(
+  parsed: any,
+  rawInput: string,
+  history: ConversationTurn[] | undefined,
+  personal: PersonalizationInput
+): Pick<ParsedShoppingIntent, 'categoryId' | 'learnedPreferences' | 'activePreferences' | 'brandFilter' | 'brandGroupLabel' | 'assumptions'> {
+  const validIds = CATEGORIES.map(c => c.id) as string[];
+  const categoryId = (validIds.includes(parsed?.categoryId) ? parsed.categoryId : personal.categoryHint || 'other') as CategoryId;
+  const cat = getCategory(categoryId);
+
+  // Keep only known fields with short string values
+  const learned: Record<string, string> = {};
+  if (parsed?.preferences && typeof parsed.preferences === 'object') {
+    for (const f of cat.preferenceFields) {
+      const v = parsed.preferences[f.key];
+      if (typeof v === 'string' && v.trim() && v.length <= 60) learned[f.key] = v.trim();
+      else if (Array.isArray(v) && v.length) learned[f.key] = v.filter(x => typeof x === 'string').join(', ').slice(0, 60);
+    }
+  }
+
+  const mergedProfile: PreferenceProfile = {
+    ...(personal.profile || {}),
+    [categoryId]: { ...(personal.profile?.[categoryId] || {}), ...learned },
+  };
+
+  // Brand groups named in this message or recent user messages ("K-beauty", "Indian brands")
+  const recentUserText = [rawInput, ...(history || []).filter(h => h.sender === 'user').slice(-3).map(h => h.text)].join(' ');
+  const groups = findBrandGroups(recentUserText, categoryId);
+  const explicit: string[] = Array.isArray(parsed?.preferredBrands)
+    ? parsed.preferredBrands.filter((b: unknown) => typeof b === 'string' && b.trim().length > 1)
+    : [];
+  const groupBrands = groups.flatMap(g => g.brands);
+  // A group name Gemini echoed back as a "brand" (e.g. "K-beauty") is not a real brand
+  const realExplicit = explicit.filter(b => !groups.some(g => g.phrases.includes(b.toLowerCase()) || g.label.toLowerCase() === b.toLowerCase()));
+  const brandFilter = Array.from(new Set([...realExplicit, ...groupBrands]));
+
+  return {
+    categoryId,
+    learnedPreferences: learned,
+    activePreferences: describePreferences(mergedProfile, categoryId),
+    brandFilter,
+    brandGroupLabel: groups.map(g => g.label).join(' / ') || undefined,
+    assumptions: typeof parsed?.assumptions === 'string' && parsed.assumptions.trim() ? parsed.assumptions.trim() : null,
   };
 }
 
@@ -1187,7 +1286,8 @@ export async function searchProductsWithTavilyAndGemini(
   imagePreviewUrl?: string,
   constraints?: UserConstraints,
   conversationHistory?: ConversationTurn[],
-  onProgress: ProgressFn = () => {}
+  onProgress: ProgressFn = () => {},
+  personal: PersonalizationInput = {}
 ): Promise<{
   result: SiftlyAnalysisResult;
   assistantSummary: string;
@@ -1220,7 +1320,7 @@ export async function searchProductsWithTavilyAndGemini(
   try {
     // 1. Understand Query with Gemini (Dynamic target, setup detection, budget allocation, follow-up memory)
     onProgress(imagePreviewUrl ? 'reading_image' : 'understanding', imagePreviewUrl ? 'Looking at your image…' : 'Understanding what you need…');
-    const parsedIntent = await understandShoppingQuery(rawInput, geminiApiKey, constraints, conversationHistory, imagePreviewUrl);
+    const parsedIntent = await understandShoppingQuery(rawInput, geminiApiKey, constraints, conversationHistory, imagePreviewUrl, personal);
     if (imagePreviewUrl && !parsedIntent.imageDescription) {
       console.warn('[intent] image attached but Gemini returned no image description');
     }
@@ -1550,6 +1650,10 @@ async function runGoogleShoppingFlow(
     onProgress,
     userRequest: rawInput,
     preferences: [...(parsedIntent.appliedPreferences || []), ...(parsedIntent.priorities || [])],
+    categoryId: parsedIntent.categoryId,
+    userPreferences: parsedIntent.activePreferences,
+    brandFilter: parsedIntent.brandFilter,
+    brandGroupLabel: parsedIntent.brandGroupLabel,
     excludeTitles: parsedIntent.excludedProductTitles || [],
     geminiKey: geminiApiKey,
   };
@@ -1578,6 +1682,10 @@ async function runGoogleShoppingFlow(
     searchQueries: queries,
     groundingSources: [],
     executionTimeMs: Date.now() - startTime,
+    categoryId: parsedIntent.categoryId,
+    learnedPreferences: parsedIntent.learnedPreferences,
+    activePreferences: parsedIntent.activePreferences,
+    assumptions: parsedIntent.assumptions || undefined,
   });
 
   // ---- Setup / bundle ----
@@ -1653,9 +1761,17 @@ async function runGoogleShoppingFlow(
     const stores = m.merchants.length > 1 ? ` across ${m.merchants.length} stores` : ` at ${m.merchants[0]?.sellerName}`;
     return `${i + 1}. **${m.title}**: ${price}${stores}${m.whyPicked ? `. ${m.whyPicked}` : ''}`;
   });
-  const prefs = parsedIntent.appliedPreferences?.length ? ` (${parsedIntent.appliedPreferences.join(', ')})` : '';
   const seen = parsedIntent.imageDescription ? `In your image I can see: ${parsedIntent.imageDescription}\n\n` : '';
-  const summary = `${seen}Here are the top ${matches.length} **${parsedIntent.cleanTarget}**${budgetStr}${prefs}:\n\n${lines.join('\n')}\n\nOpen **Compare stores** on any product to see every store's price and offers.`;
+  const forYou = [
+    ...parsedIntent.activePreferences,
+    ...(parsedIntent.brandGroupLabel &&
+    !parsedIntent.activePreferences.some(p => p.toLowerCase().includes(parsedIntent.brandGroupLabel!.toLowerCase()))
+      ? [`Brands: ${parsedIntent.brandGroupLabel}`]
+      : []),
+  ];
+  const personalLine = forYou.length ? `Picked for you: ${forYou.join(' · ')}\n` : '';
+  const assumptionLine = parsedIntent.assumptions ? `${parsedIntent.assumptions}\n` : '';
+  const summary = `${seen}Here are the top ${matches.length} **${parsedIntent.cleanTarget}**${budgetStr}:\n${personalLine}${assumptionLine}\n${lines.join('\n')}\n\nOpen **Compare stores** on any product to see every store's price and offers.`;
 
   return {
     result: resultBase([makeEntity(entityId, parsedIntent.cleanTarget, parsedIntent.shoppingQuery)], { [entityId]: matches }, [parsedIntent.shoppingQuery]),

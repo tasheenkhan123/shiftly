@@ -8,11 +8,13 @@ interface ChatInputProps {
   /** imageDataUrl is a downscaled JPEG data URL when the user attached a screenshot/photo */
   onSend: (text: string, imageDataUrl?: string) => void;
   isLoading: boolean;
+  /** Overrides the default hint text (e.g. a category example) */
+  placeholder?: string;
 }
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading, placeholder }) => {
   const [text, setText] = useState('');
   const [image, setImage] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -146,7 +148,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading }) => {
                 handleSubmit();
               }
             }}
-            placeholder={image ? 'Add details (optional), e.g. "under ₹2,000" or "cheaper alternatives"' : 'What are you shopping for? e.g. "face wash for oily skin under ₹500"'}
+            placeholder={image ? 'Add details (optional), e.g. "under ₹2,000" or "cheaper alternatives"' : placeholder || 'What are you shopping for? e.g. "face wash for oily skin under ₹500"'}
             className="flex-1 bg-transparent resize-none text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none leading-relaxed py-2 max-h-36"
           />
           <button

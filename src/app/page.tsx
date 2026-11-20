@@ -8,10 +8,12 @@ import { ChatMessageBubble } from '@/components/ChatMessageBubble';
 import { AuthModal } from '@/components/AuthModal';
 import { PriceComparisonModal } from '@/components/shopping/PriceComparisonModal';
 import { SavedLooksDrawer } from '@/components/SavedLooksDrawer';
+import { PreferencesModal } from '@/components/PreferencesModal';
+import { SELECTABLE_CATEGORIES, getCategory, type CategoryId, type PreferenceProfile } from '@/lib/categories';
 import { ChatSession, ChatMessage, ProductMatch, SearchProgressEvent } from '@/types';
 import { useAuth } from '@/lib/supabase/useAuth';
 import { getSupabase } from '@/lib/supabase/client';
-import { cloudStore, localStore, migrateLocalToCloud, productKey, sortSessions, type UserDataStore } from '@/lib/store/userData';
+import { cloudStore, localStore, mergeProfile, migrateLocalToCloud, productKey, sortSessions, type UserDataStore } from '@/lib/store/userData';
 import { downscaleImage } from '@/lib/image';
 
 const nowTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -32,6 +34,15 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState<ProgressStep[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [profile, setProfile] = useState<PreferenceProfile>({});
+  const profileRef = useRef<PreferenceProfile>({});
+  const [isPrefsOpen, setIsPrefsOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<CategoryId | null>(null);
+
+  const commitProfile = (next: PreferenceProfile) => {
+    profileRef.current = next;
+    setProfile(next);
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sessionsRef = useRef<ChatSession[]>([]);
@@ -66,10 +77,18 @@ export default function HomePage() {
           const moved = await migrateLocalToCloud(store);
           if (moved > 0 && !cancelled) setNotice(`Moved ${moved} chats and saved items from this browser into your account.`);
         }
-        const [list, saved] = await Promise.all([store.listSessions(), store.listSaved()]);
+        // Load each independently: one missing table must not hide the user's other data
+        const [listR, savedR, prefsR] = await Promise.allSettled([store.listSessions(), store.listSaved(), store.getProfile()]);
         if (cancelled) return;
+        const firstError = [listR, savedR, prefsR].find(r => r.status === 'rejected') as PromiseRejectedResult | undefined;
+        if (firstError) reportError(firstError.reason);
+        const list = listR.status === 'fulfilled' ? listR.value : [];
+        const saved = savedR.status === 'fulfilled' ? savedR.value : [];
+        const prefs = prefsR.status === 'fulfilled' ? prefsR.value : {};
         commitSessions(list);
         setSavedProducts(saved);
+        profileRef.current = prefs;
+        setProfile(prefs);
         setActiveSessionId(list[0]?.id ?? null);
       } catch (err) {
         if (!cancelled) reportError(err);
@@ -107,6 +126,7 @@ export default function HomePage() {
 
   const handleNewChat = () => {
     setActiveSessionId(null);
+    setSelectedCategory(null);
     setSidebarOpen(false);
   };
 
@@ -178,7 +198,13 @@ export default function HomePage() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: text, imagePreviewUrl: imageDataUrl, conversationHistory: history }),
+        body: JSON.stringify({
+          input: text,
+          imagePreviewUrl: imageDataUrl,
+          conversationHistory: history,
+          profile: profileRef.current,
+          category: selectedCategory || undefined,
+        }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
@@ -206,6 +232,21 @@ export default function HomePage() {
         }
       }
       if (!data) throw new Error('The search ended without a result. Please try again.');
+
+      // Remember what the user told us about themselves ("I have oily skin", "size 9")
+      const learned: Record<string, string> = data.learnedPreferences || {};
+      if (data.categoryId && Object.keys(learned).length > 0) {
+        const before = profileRef.current[data.categoryId as CategoryId] || {};
+        const changed = Object.entries(learned).filter(([k, v]) => before[k] !== v);
+        if (changed.length > 0) {
+          const next = mergeProfile(profileRef.current, data.categoryId, learned);
+          commitProfile(next);
+          store.saveProfile(next).catch(reportError);
+          const fields = getCategory(data.categoryId).preferenceFields;
+          const desc = changed.map(([k, v]) => `${fields.find(f => f.key === k)?.label || k}: ${v}`).join(', ');
+          setNotice(`Remembered for next time: ${desc}. You can change this in Your preferences.`);
+        }
+      }
 
       assistantMsg = {
         id: newId('msg_assistant'),
@@ -260,6 +301,7 @@ export default function HomePage() {
         onTogglePin={handleTogglePin}
         user={user}
         onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenPreferences={() => setIsPrefsOpen(true)}
         onSignOut={signOut}
       />
 
@@ -315,9 +357,34 @@ export default function HomePage() {
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">What are you shopping for?</h1>
               <p className="text-sm text-slate-500 max-w-md">
-                Describe what you need and your budget, or paste a screenshot of a product. Siftly finds the best options and compares
-                prices and offers across Indian stores.
+                Describe what you need and your budget, or paste a screenshot of a product. Siftly finds the best options for you and
+                compares prices and offers across Indian stores.
               </p>
+              <div className="flex flex-wrap justify-center gap-2 pt-2">
+                {SELECTABLE_CATEGORIES.map(c => {
+                  const on = selectedCategory === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setSelectedCategory(on ? null : c.id)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                        on ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {c.emoji} {c.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedCategory && (
+                <p className="text-xs text-slate-500">
+                  Try: <span className="text-slate-700">“{getCategory(selectedCategory).example}”</span>
+                  {' · '}
+                  <button className="text-blue-600 hover:underline" onClick={() => setIsPrefsOpen(true)}>
+                    set your {getCategory(selectedCategory).label.toLowerCase()} preferences
+                  </button>
+                </p>
+              )}
             </div>
           ) : (
             currentMessages.map(msg => (
@@ -337,7 +404,11 @@ export default function HomePage() {
         </div>
 
         <div className="sticky bottom-0 z-20 w-full bg-gradient-to-t from-white via-white/95 to-transparent pt-3 pb-1">
-          <ChatInput onSend={handleSendMessage} isLoading={isLoading} />
+          <ChatInput
+            onSend={handleSendMessage}
+            isLoading={isLoading}
+            placeholder={selectedCategory ? `e.g. ${getCategory(selectedCategory).example}` : undefined}
+          />
         </div>
       </div>
 
@@ -349,6 +420,19 @@ export default function HomePage() {
       />
 
       <PriceComparisonModal product={activeModalProduct} currency="INR" onClose={() => setActiveModalProduct(null)} />
+
+      <PreferencesModal
+        isOpen={isPrefsOpen}
+        onClose={() => setIsPrefsOpen(false)}
+        profile={profile}
+        signedIn={Boolean(user)}
+        initialCategory={selectedCategory || undefined}
+        onSave={next => {
+          commitProfile(next);
+          store.saveProfile(next).catch(reportError);
+          setNotice('Preferences saved.');
+        }}
+      />
 
       <SavedLooksDrawer
         isOpen={isSavedDrawerOpen}

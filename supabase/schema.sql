@@ -65,3 +65,26 @@ create policy "own saved - select" on public.saved_products for select using (au
 create policy "own saved - insert" on public.saved_products for insert with check (auth.uid() = user_id);
 create policy "own saved - update" on public.saved_products for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "own saved - delete" on public.saved_products for delete using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------
+-- Preference profile (skin type, shoe size, favourite brands...), one row per user.
+-- Added for personalised recommendations. Safe to re-run.
+-- ---------------------------------------------------------------
+create table if not exists public.user_profiles (
+  user_id     uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  preferences jsonb not null default '{}'::jsonb,
+  updated_at  timestamptz not null default now()
+);
+
+revoke all on public.user_profiles from anon;
+grant select, insert, update, delete on public.user_profiles to authenticated;
+alter table public.user_profiles enable row level security;
+
+drop policy if exists "own profile - select" on public.user_profiles;
+drop policy if exists "own profile - insert" on public.user_profiles;
+drop policy if exists "own profile - update" on public.user_profiles;
+drop policy if exists "own profile - delete" on public.user_profiles;
+create policy "own profile - select" on public.user_profiles for select using (auth.uid() = user_id);
+create policy "own profile - insert" on public.user_profiles for insert with check (auth.uid() = user_id);
+create policy "own profile - update" on public.user_profiles for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own profile - delete" on public.user_profiles for delete using (auth.uid() = user_id);

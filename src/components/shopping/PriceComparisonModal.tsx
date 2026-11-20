@@ -166,8 +166,11 @@ export const PriceComparisonModal: React.FC<PriceComparisonModalProps> = ({
                         </>
                       )}
                     </div>
-                    {(merchant.discountLabel || merchant.tag || (merchant.offers && merchant.offers.length > 0)) && (
+                    {(merchant.trusted || merchant.discountLabel || merchant.tag || (merchant.offers && merchant.offers.length > 0)) && (
                       <div className="flex flex-wrap gap-1 mt-1.5 max-w-xs">
+                        {merchant.trusted && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-[9px] font-semibold text-emerald-700">Trusted store</span>
+                        )}
                         {merchant.tag && (
                           <span className="px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[9px] font-semibold text-blue-700">{merchant.tag}</span>
                         )}
