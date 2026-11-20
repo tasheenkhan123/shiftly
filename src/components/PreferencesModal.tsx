@@ -149,7 +149,7 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({ isOpen, onCl
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`shrink-0 pl-1.5 pr-3 py-1 rounded-full text-xs font-semibold border transition-colors flex items-center gap-1.5 ${
-                tab === t.id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                tab === t.id ? 'bg-blue-50 text-blue-700 border-blue-300' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
             >
               <CategoryTile id={t.id} size="sm" />

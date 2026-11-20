@@ -446,7 +446,7 @@ export default function HomePage() {
                       aria-label={c.label}
                       style={{ animationDelay: `${240 + i * 50}ms` }}
                       className={`siftly-pop group relative p-1.5 rounded-2xl border transition-colors ${
-                        on ? 'bg-slate-900 border-slate-900' : 'bg-white border-slate-200 hover:bg-slate-50'
+                        on ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-100' : 'bg-white border-slate-200 hover:bg-slate-50'
                       }`}
                     >
                       <CategoryTile id={c.id} size="lg" />
