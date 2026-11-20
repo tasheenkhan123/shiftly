@@ -88,3 +88,54 @@ create policy "own profile - select" on public.user_profiles for select using (a
 create policy "own profile - insert" on public.user_profiles for insert with check (auth.uid() = user_id);
 create policy "own profile - update" on public.user_profiles for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "own profile - delete" on public.user_profiles for delete using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------
+-- Search rate limits (abuse protection). Safe to re-run.
+-- The app calls consume_search_quota() once per search. Keys are HMAC hashes of the user id or IP,
+-- so no raw IPs or ids are stored. Nobody can read or edit the table directly.
+-- ---------------------------------------------------------------
+create table if not exists public.search_quota (
+  key          text primary key,
+  window_start timestamptz not null default now(),
+  count        integer not null default 0
+);
+alter table public.search_quota enable row level security;
+revoke all on public.search_quota from anon, authenticated;
+
+create or replace function public.consume_search_quota(p_key text, p_limit integer, p_window_seconds integer)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row public.search_quota;
+  v_now timestamptz := now();
+begin
+  if p_key is null or length(p_key) < 16 or p_limit < 1 or p_limit > 1000 or p_window_seconds < 60 then
+    raise exception 'invalid arguments';
+  end if;
+
+  insert into public.search_quota as q (key, window_start, count)
+  values (p_key, v_now, 0)
+  on conflict (key) do update
+    set window_start = case when q.window_start < v_now - make_interval(secs => p_window_seconds) then v_now else q.window_start end,
+        count        = case when q.window_start < v_now - make_interval(secs => p_window_seconds) then 0 else q.count end
+  returning * into v_row;
+
+  if v_row.count >= p_limit then
+    return json_build_object('allowed', false, 'count', v_row.count,
+      'reset_in_seconds', greatest(1, extract(epoch from (v_row.window_start + make_interval(secs => p_window_seconds) - v_now))::int));
+  end if;
+
+  update public.search_quota set count = count + 1 where key = p_key returning * into v_row;
+  return json_build_object('allowed', true, 'count', v_row.count,
+    'reset_in_seconds', greatest(1, extract(epoch from (v_row.window_start + make_interval(secs => p_window_seconds) - v_now))::int));
+end;
+$$;
+
+revoke all on function public.consume_search_quota(text, integer, integer) from public;
+grant execute on function public.consume_search_quota(text, integer, integer) to anon, authenticated;
+
+-- Old windows can be cleaned up occasionally:
+-- delete from public.search_quota where window_start < now() - interval '1 day';

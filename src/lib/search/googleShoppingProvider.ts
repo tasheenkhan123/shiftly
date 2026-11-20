@@ -13,6 +13,7 @@
 import { MatchTier, MerchantOffer, ProductMatch } from '@/types';
 import { callGeminiJson } from '@/lib/ai/gemini';
 import { getCategory, isTrustedStore, type CategoryId } from '@/lib/categories';
+import { currentMetrics } from '@/lib/metrics';
 
 // ---------------------------------------------------------------------------
 // Small in-memory cache: repeat searches are instant and don't spend SerpApi credits.
@@ -22,7 +23,11 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
 const cache = new Map<string, { at: number; value: unknown }>();
 async function cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value as T;
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+    const m = currentMetrics();
+    if (m) m.cacheHits++;
+    return hit.value as T;
+  }
   const value = await fn();
   cache.set(key, { at: Date.now(), value });
   if (cache.size > 300) cache.delete(cache.keys().next().value as string);
@@ -71,6 +76,17 @@ export interface ProductStoresResult {
   stores: StoreListing[];
 }
 
+/** SerpApi plan limit reached ("Your account has run out of searches"): don't pretend results are complete */
+export class SearchQuotaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SearchQuotaError';
+  }
+}
+
+export const QUOTA_MESSAGE =
+  "Siftly's product search has hit its usage limit for now (Google Shopping via SerpApi). Please try again later. If you run this app, check your SerpApi plan.";
+
 export function isGoogleShoppingConfigured(): boolean {
   return Boolean(process.env.SERPAPI_API_KEY?.trim());
 }
@@ -78,6 +94,8 @@ export function isGoogleShoppingConfigured(): boolean {
 async function serpApiGet(params: Record<string, string>, timeoutMs = 20000): Promise<any> {
   const apiKey = process.env.SERPAPI_API_KEY?.trim();
   if (!apiKey) throw new Error('SERPAPI_API_KEY is not configured');
+  const m = currentMetrics();
+  if (m) m.serpApiCalls++;
 
   const url = new URL(SERPAPI_ENDPOINT);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
@@ -89,7 +107,11 @@ async function serpApiGet(params: Record<string, string>, timeoutMs = 20000): Pr
     const res = await fetch(url.toString(), { signal: controller.signal, cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data?.error) {
-      throw new Error(`SerpApi ${params.engine} failed (HTTP ${res.status}): ${data?.error || 'unknown error'}`);
+      const msg = `SerpApi ${params.engine} failed (HTTP ${res.status}): ${data?.error || 'unknown error'}`;
+      if (res.status === 429 || /run out of searches|plan limit|exceeded/i.test(String(data?.error || ''))) {
+        throw new SearchQuotaError(msg);
+      }
+      throw new Error(msg);
     }
     return data;
   } finally {
@@ -196,6 +218,8 @@ export interface Pick {
   reason: string;
   fitsYou?: string[];
   highlights?: string[];
+  /** Right product type but doesn't match every preference (e.g. fruity but more floral than citrus) */
+  closeMatch?: boolean;
 }
 
 function normTitle(t: string): string {
@@ -268,14 +292,14 @@ Rules:
 - Prefer listings "sold by multiple stores" and from major Indian stores (Amazon.in, Flipkart, Nykaa, Purplle, Tira, Tata 1mg, Myntra) over small unknown sellers.
 - Each pick must be a DIFFERENT product, ideally from a different brand.
 - PERSONALISE: choose products that genuinely suit what the customer told us about themselves (skin type, size, use, scent, etc.), using the expertise above and well-known facts about these products. A popular product that does not suit them is a worse pick than a slightly less popular one that does.
-- If fewer than ${ctx.count} listings qualify, return fewer. Do not pad.
+- Return exactly ${ctx.count} picks whenever at least ${ctx.count} listings are the right product type. Best matches first. If fewer listings match every preference, fill the remaining slots with the closest matches of the right product type and set "closeMatch": true on them, with a reason that honestly says how it differs (e.g. "Fruity, but more floral than citrus"). Only return fewer if fewer listings are even the right product type.
 - Never use a size (e.g. "UK 9", "M") as a fitsYou tag: we cannot confirm a size is in stock.
 - In reasons, never claim the customer asked for something they did not say (no "the matte finish you requested" unless they asked for matte).
 
 Listings:
 ${lines}
 
-Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one short sentence on why it suits THIS customer, tied to what they told us when relevant (e.g. 'Gel texture with salicylic acid that controls oil without drying'). Do NOT mention any price or store name, because prices are shown separately and differ per store.","fitsYou":["up to 3 very short tags linking the product to the customer, e.g. 'Oily skin: oil-free gel', 'K-beauty'. Use [] if the customer told us nothing."],"highlights":["up to 3 concrete facts about THIS product from your knowledge: scent notes for fragrances (e.g. 'Juicy pear', 'Sparkling clementine'), key ingredients for skincare, key specs for electronics, material for clothes. Never ratings, popularity, price or words like 'recommended'. [] if unsure."]}]}`;
+Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one short sentence on why it suits THIS customer, tied to what they told us when relevant (e.g. 'Gel texture with salicylic acid that controls oil without drying'). Do NOT mention any price or store name, because prices are shown separately and differ per store.","fitsYou":["up to 3 very short tags linking the product to the customer, e.g. 'Oily skin: oil-free gel', 'K-beauty'. Use [] if the customer told us nothing."],"closeMatch":false,"highlights":["up to 3 concrete facts about THIS product from your knowledge: scent notes for fragrances (e.g. 'Juicy pear', 'Sparkling clementine'), key ingredients for skincare, key specs for electronics, material for clothes. Never ratings, popularity, price or words like 'recommended'. [] if unsure."]}]}`;
 
   const parsed = await callGeminiJson<{ picks?: Pick[] }>(prompt, geminiKey, { label: 'shopping-pick', totalTimeoutMs: 14000 });
   // Gemini returns either {"picks":[...]} or a bare [...] array
@@ -295,7 +319,7 @@ Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one 
           // drop filler that isn't a product fact
           .filter((x: string) => !/rated|rating|review|recommend|shortlist|popular|best ?seller|budget|price|value for money|gift/i.test(x)).map((x: string) => x.trim().slice(0, 40)).slice(0, 3)
       : [];
-    unique.push({ index, brand: str(p.brand) || '', reason: str(p.reason) || '', fitsYou, highlights });
+    unique.push({ index, brand: str(p.brand) || '', reason: str(p.reason) || '', fitsYou, highlights, closeMatch: p.closeMatch === true });
     if (unique.length === ctx.count) break;
   }
   if (unique.length === 0) {
@@ -617,6 +641,7 @@ async function buildMatches(
         fitsYou: pick.fitsYou && pick.fitsYou.length ? pick.fitsYou : undefined,
         highlights: pick.highlights && pick.highlights.length ? pick.highlights : undefined,
         isTopPick: idx === 0,
+        closeMatch: pick.closeMatch || undefined,
         trustedOffer,
         scoreBreakdown: {
           visualSimilarity: 0,

@@ -242,9 +242,11 @@ export default function HomePage() {
 
     let assistantMsg: ChatMessage;
     try {
+      // Signed-in users send their session token so they get the higher search limit
+      const token = user ? (await getSupabase()?.auth.getSession())?.data.session?.access_token : undefined;
       const res = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           input: text,
           imagePreviewUrl: imageDataUrl,

@@ -1,246 +1,131 @@
-# Siftly 🛍️
+# Siftly
 
-> **An AI-powered intelligent shopping assistant that searches the live web, groups complete setups with component alternatives, verifies direct retailer links, and compares real prices across top stores.**
+**A personalised shopping assistant for India.** Describe what you need ("face wash for oily skin under ₹500", "gaming setup under 1 lakh") or paste a product screenshot. Siftly finds real products on Google Shopping, picks the best ones *for you*, and compares prices, stock and offers across Indian stores.
 
----
-
-## 🌟 Overview
-
-**Siftly** is an agentic shopping assistant built with Next.js 16, React 19, Google Gemini, and Tavily. Unlike typical shopping bots that hallucinate items or rely on stale static databases, Siftly executes real-time web searches against active e-commerce platforms, verifies physical product identities and categories, computes coordinated multi-component bundles, and links directly to exact product checkout pages.
+**Live demo:** https://shiftly-alpha-rouge.vercel.app
 
 ---
 
-## ✨ Key Features
+## What it does
 
-- **🎯 Intelligent Intent & Context Understanding**:
-  - Distinguishes between single-item searches and complex, multi-component bundles (e.g., complete gaming setups, skincare routines, home office workstations).
-  - Preserves conversational context across follow-ups (*"Make it cheaper"*, *"Add a monitor"*, *"I have sensitive skin"*).
-  - Makes smart initial assumptions to avoid questionnaire fatigue, asking at most one essential clarifying question when needed.
+| | |
+|---|---|
+| 🔎 **Real products, real prices** | Live Google Shopping India listings (via SerpApi). Prices are never invented: unknown prices show "Check price". |
+| 🏪 **Multi-store comparison** | For each pick: every store's price, stock, delivery and offers (e.g. "Flat ₹300 off first order"), cheapest buyable store first, trusted stores marked, suspicious prices flagged. |
+| 🧠 **Understands the request** | Budgets ("under 1 lakh"), follow-ups ("make it cheaper", "in mists"), new searches vs follow-ups, gifts ("for my dad"), brand groups ("K-beauty" → COSRX, Anua, Beauty of Joseon…). |
+| 📸 **Screenshot search** | Paste or drop an image; Gemini identifies the exact product, then Siftly finds it in stores. |
+| 🎯 **Personalisation** | Remembers stable facts you mention ("I have oily skin", "UK 9") per category, asks one quick question when it matters, and shows *why* each product was picked. Gift searches never use your own profile. |
+| 🖥️ **Complete setups** | "Gaming setup under ₹1 lakh" → one product per part, planned from real prices to use 85–100% of the budget, with alternatives. |
+| 👤 **Accounts** | Supabase sign-up/sign-in; chats, pinned chats, saved products and preferences sync per user (Row Level Security). Guests keep data in the browser and it moves into their account on sign-in. |
 
-- **🖥️ Complete Setup & Bundle Intelligence**:
-  - Dynamically decomposes bundle requests into essential component categories (e.g., PC, Monitor, Keyboard/Mouse combo, Headset, Ergonomic Desk/Chair).
-  - Recommends up to **3 verified alternatives per component category**, allowing customers to select their preferred configuration.
-  - Computes total budget against the **starter combination** (sum of 1 item per category), ensuring practical configurations never silently exceed the stated budget.
-
-- **🛡️ Strict Category & Identity Verification**:
-  - Deterministic category filtering ensures zero category cross-contamination (e.g., queries for a *toner* will never return *serums*, *cleansers*, or *moisturizers*).
-  - Verifies brand, product name, model number, formulation, and variant.
-
-- **🔗 Exact Direct Retailer Links**:
-  - Deep-links directly to the verified product-detail page (PDP) on retailers like Amazon India, Nykaa, Tira Beauty, Flipkart, and DTC brand stores.
-  - Avoids broken links, homepage redirects, and noisy generic store-search pages.
-
-- **🏷️ Real Multi-Store Price Comparison**:
-  - Discovers the same exact product across multiple competing merchants.
-  - Displays verified prices, stock availability, and merchant badges to help buyers find the best deal.
-
-- **📸 Visual & OCR Search**:
-  - Integrated with **Tesseract.js** to extract product names and text from user-uploaded screenshots, labels, and moodboards.
-
-- **💾 Saved Looks & History Drawer**:
-  - Bookmark favorite products and complete setup looks locally with real-time price tracking.
-
----
-
-## 🏗️ Architecture & Search Pipeline
-
-Siftly uses a dual-engine architecture combining Google Gemini's reasoning with Tavily's real-time web crawling:
+## Architecture
 
 ```mermaid
-graph TD
-    UserQuery[User Shopping Prompt / Follow-up] --> GeminiIntent[1. Gemini Query Understanding]
-    GeminiIntent --> IntentClassification{Bundle or Single Product?}
-    
-    IntentClassification -->|Single Item| SingleSearch[Tavily Search: Domain-Targeted PDP Discovery]
-    IntentClassification -->|Setup / Bundle| BundleSplit[Component Category Decomposition & Budget Allocation]
-    
-    BundleSplit --> MultiSearch[Parallel Tavily Searches per Category]
-    
-    SingleSearch --> Extraction[2. Gemini Evidence Extraction & Category Filtering]
-    MultiSearch --> Extraction
-    
-    Extraction --> Verification[3. Deterministic Category & Link Verification]
-    Verification --> MultiStore[4. Multi-Store Offer Matching & Price De-duplication]
-    MultiStore --> Ranking[5. Evidence-Based Scoring & Brand Diversity Selection]
-    Ranking --> UI[6. Grouped UI with Alternatives & Direct Retailer Links]
+flowchart LR
+    U[Browser<br/>Next.js + React 19] -- "POST /api/analyze<br/>(streams NDJSON progress)" --> R[Route handler<br/>rate limit · metrics]
+    R --> O[searchOrchestrator]
+    O --> I[intent.ts<br/>Gemini: understand request,<br/>image, gift, budget, profile]
+    O --> F[googleShoppingFlow]
+    F --> G[googleShoppingProvider<br/>SerpApi: Google Shopping<br/>+ per-store offers]
+    F --> P[setupPlanner<br/>budget-aware setups]
+    G --> K[Gemini picker<br/>chooses real listings only]
+    O -. fallback .-> T[tavilyFallback<br/>legacy web search]
+    U <--> S[(Supabase<br/>auth · chats · saved ·<br/>preferences · quotas)]
 ```
 
-1. **Query & Intent Parsing**: Gemini 2.5 parses user constraints, budget limits, category intent, and conversational history.
-2. **Live Web Crawling**: Tavily queries targeted retail domains (Amazon India, Nykaa, Tira, Flipkart, etc.) without obstructive query syntax.
-3. **Evidence Extraction**: Product titles, brands, prices, images, and destination URLs are extracted strictly from grounded search snippets.
-4. **Category & Identity Guardrails**: Algorithmic rules verify that candidate titles match the exact target category (e.g., discarding AHA BHA serum candidates when searching for toner).
-5. **Multi-Store Discovery**: The pipeline searches alternative stores for identical product titles and merges them into comparison offers.
-6. **Grouped Presentation**: Setups are organized into clear component sub-grids showing alternatives, while single products render in a clean 3-recommendation layout.
+**Request flow:** understand the request (Gemini, 1 call) → search Google Shopping (1+ SerpApi calls) → Gemini picks the best real listings → fetch every store's price and offers for each pick → stream the result back.
 
----
+## Engineering decisions worth noting
 
-## 🛠️ Tech Stack
+- **The model suggests; the code decides.** LLM output is never trusted for hard rules. Examples found during testing and fixed in code:
+  - A ₹1 lakh gaming setup came to ₹14,607 because the model budgeted ₹60k for an RTX PC that really costs ₹75k+, and the PC was silently dropped. Now every part is searched first, the plan is made from real prices, and code enforces the budget (swaps down when over, upgrades when under 85%).
+  - The model picked a PC with integrated graphics while claiming "RTX 3050". Now code labels PCs by GPU from listing titles, rejects PC cases/cabinets, and for gaming keeps only dedicated-GPU PCs.
+  - Picks pointing at listing numbers that don't exist are discarded; filler "highlights" ("Popular gifting choice") are filtered.
+- **Hedged LLM requests.** I timed each Gemini model on the project's key: the fastest answered in ~1.5–2s while others took 2–20s or returned "high demand". Siftly calls the fastest first and, if it hasn't answered in a few seconds, starts a backup model in parallel; the first valid answer wins, with a hard time budget per step.
+- **Data quality filters.** Overseas importers (which list inflated import prices) are filtered, http store links are upgraded to https, out-of-stock stores never become "lowest price", and prices below 55% / above 3× the median are flagged or dropped.
+- **Brand catalogs.** For "Bath & Body Works fruity mist", a descriptive query returned 36/40 overseas importers; searching the brand's catalog by product type returned the official India store at the real ₹999. Official stores are matched even when titles omit the brand.
+- **Abuse protection.** Per-user/per-IP hourly search limits, counted in Supabase via a `security definer` function (HMAC-hashed keys; no raw IPs stored), with an in-memory fallback.
+- **Streaming UX.** The API streams NDJSON progress; the UI shows one live "thinking" line and "Searched for Ns".
+- **Privacy & security.** Row Level Security on every table, profile input sanitised before it reaches prompts, guest data never leaves the browser.
 
-| Layer | Technologies |
-| :--- | :--- |
-| **Framework** | [Next.js 16 (App Router, Turbopack)](https://nextjs.org/) |
-| **Frontend UI** | [React 19](https://react.dev/), [TypeScript](https://www.typescriptlang.org/), [Tailwind CSS](https://tailwindcss.com/) |
-| **Icons & Animation** | [Lucide React](https://lucide.dev/), [Framer Motion](https://www.framer.com/motion/), [Canvas Confetti](https://www.npmjs.com/package/canvas-confetti) |
-| **Vision & OCR** | [Tesseract.js](https://tesseract.projectnaptha.com/) |
-| **AI & LLM** | [Google Gemini 2.5 API](https://ai.google.dev/) (`gemini-2.5-flash` / `gemini-2.5-flash-lite`) |
-| **Web Search Engine** | [Tavily Search API](https://tavily.com/) |
+## Quality: tests and evals
 
----
+```bash
+npm test        # 28 unit tests, no network (Gemini and SerpApi are stubbed)
+npm run eval    # 6 real searches against a running server, 34 checks (costs ~25–30 SerpApi credits)
+```
 
-## 📁 Project Structure
+- **Unit tests** cover budget enforcement in the setup planner, store ordering and suspicious-price handling, brand matching for official stores, gift and memory rules, input sanitising, rate limits, and quota-exhaustion handling. Each was verified to fail when the rule it protects is broken.
+- **The eval** runs real searches and checks rules such as "every price within budget", "only K-beauty brands", "gift search learns nothing", "gaming PC has a dedicated GPU", "no overseas importers", "all links https".
+
+**Measured (local, November 2026):** single-product searches took ~9–25s and setups ~13–27s, using a median of 7 SerpApi calls per search (search + per-store comparison). In a full eval run, 30/34 checks passed; the 4 failures were traced to the SerpApi free plan running out mid-run. That led to a fix: Siftly now reports the limit honestly instead of showing a partial setup.
+
+## Tech stack
+
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS · Google Gemini · SerpApi (Google Shopping) · Supabase (Auth + Postgres + RLS) · Vitest · Vercel
+
+## Running locally
+
+**1. Install**
+```bash
+npm install
+```
+
+**2. Configure `.env.local`** (see `.env.example`)
+```env
+GEMINI_API_KEY=...                 # https://aistudio.google.com/app/apikey
+SERPAPI_API_KEY=...                # https://serpapi.com (Google Shopping)
+NEXT_PUBLIC_SUPABASE_URL=...       # Supabase → Project Settings → API
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...  # the anon / publishable key (never the service_role key)
+TAVILY_API_KEY=...                 # optional: legacy fallback search
+```
+
+**3. Set up the database:** run `supabase/schema.sql` in the Supabase SQL Editor (tables, Row Level Security, rate-limit function). Under Authentication → URL Configuration, set the Site URL and add `http://localhost:3000/**` to Redirect URLs.
+
+**4. Run**
+```bash
+npm run dev     # http://localhost:3000
+npm test
+```
+
+## Project structure
 
 ```text
-Siftly/
-├── public/                       # Static public assets & brand icons
-├── src/
-│   ├── app/
-│   │   ├── api/
-│   │   │   └── analyze/
-│   │   │       └── route.ts      # Main POST API endpoint for chat & search analysis
-│   │   ├── globals.css           # Global Tailwind styling and animations
-│   │   ├── layout.tsx            # Root application layout & metadata
-│   │   └── page.tsx              # Main interactive shopping dashboard
-│   ├── components/
-│   │   ├── shopping/
-│   │   │   ├── DetectedLookBar.tsx       # Active bundle / entity status bar
-│   │   │   ├── PriceComparisonModal.tsx  # Multi-merchant comparison modal
-│   │   │   ├── ProductCard.tsx           # Product card with price, rating, & retailer links
-│   │   │   └── ShoppingView.tsx          # Shopping results grid wrapper
-│   │   ├── recipe/                       # Recipe & ingredient breakdown components
-│   │   ├── AnalysisProgressIndicator.tsx # Search status steps indicator
-│   │   ├── AuthModal.tsx                 # Optional user authentication modal
-│   │   ├── ChatInput.tsx                 # Search & prompt text input bar
-│   │   ├── ChatMessageBubble.tsx         # Chat feed & grouped bundle component display
-│   │   ├── Header.tsx                    # Top navigation, logo, and active look counters
-│   │   ├── SavedLooksDrawer.tsx          # Saved items and wishlist slide-out drawer
-│   │   ├── Sidebar.tsx                   # Filter sidebar, budget sliders, & category selectors
-│   │   └── UnifiedInput.tsx              # Multi-modal input (text + image upload + OCR)
-│   ├── lib/
-│   │   ├── ai/
-│   │   │   └── pipeline.ts               # Core shopping pipeline orchestrator
-│   │   ├── search/
-│   │   │   ├── geminiShoppingService.ts  # Gemini prompt formatting & response parsing
-│   │   │   ├── liveRetailerSearch.ts     # Fallback query builders
-│   │   │   └── tavilyShoppingPipeline.ts # Live Tavily crawler, category filters & bundle logic
-│   │   ├── security/
-│   │   │   └── urlValidator.ts           # Safe retailer URL parsing & affiliate link validation
-│   │   ├── vision/
-│   │   │   ├── dynamicProductResolver.ts # Vision fallback resolver
-│   │   │   ├── ocrExtractor.ts           # Tesseract OCR processing
-│   │   │   └── smartImageAnalyzer.ts     # Vision analysis pipeline
-│   │   └── constants.ts                  # Category definitions, retailer list, and fallbacks
-│   └── types/
-│       └── index.ts                      # Shared TypeScript data models
-├── .env.example                  # Environment variable template with placeholders
-├── .gitignore                    # Git exclusions protecting secrets and build files
-├── next.config.mjs               # Next.js configuration
-├── package.json                  # Project dependencies & scripts
-├── tailwind.config.ts            # Tailwind CSS styling configuration
-└── tsconfig.json                 # TypeScript compiler options
+src/
+├── app/
+│   ├── api/analyze/route.ts        # streaming search API: validation, rate limit, metrics
+│   ├── page.tsx                    # chat UI, accounts, preferences, saved items
+│   └── layout.tsx
+├── components/                     # ChatInput, ChatMessageBubble, ProductCard, PriceComparisonModal,
+│                                   # AuthModal, PreferencesModal, OnboardingModal, Sidebar, ...
+└── lib/
+    ├── ai/
+    │   ├── gemini.ts               # hedged Gemini JSON calls (text + image)
+    │   ├── intent.ts               # understand the request + personalisation rules
+    │   └── constraints.ts          # budget / brand parsing
+    ├── search/
+    │   ├── searchOrchestrator.ts   # entry point
+    │   ├── googleShoppingFlow.ts   # single products + setups on Google Shopping
+    │   ├── googleShoppingProvider.ts  # SerpApi client, picking, store comparison, filters
+    │   ├── setupPlanner.ts         # budget-aware setups, PC/GPU validation
+    │   ├── tavilyFallback.ts       # legacy web-search fallback
+    │   └── types.ts
+    ├── categories.ts               # per-category preferences, expert rules, brand groups, trusted stores
+    ├── store/userData.ts           # Supabase / browser storage for chats, saved items, profile
+    ├── security/                   # rate limits, input sanitising, URL validation
+    └── metrics.ts                  # per-search time and API usage
+supabase/schema.sql                 # tables, RLS policies, rate-limit function
+tests/                              # Vitest unit tests
+scripts/eval-search.mjs             # real-search quality eval
 ```
 
----
+## Known limitations
 
-## 🚀 Getting Started
+- **Speed:** 10–30s per search, mostly external API latency (each Google Shopping call takes ~5s). Vercel functions are pinned to Mumbai (`vercel.json`) to cut round trips.
+- **Bank/card offers are partial:** Siftly shows the offers Google lists for each store; many bank-specific offers only appear on store pages.
+- **Product knowledge in explanations** (scent notes, "good for flat feet") comes from Gemini and isn't verified against store pages.
+- **Free API tiers:** the SerpApi free plan supports limited searches per month; heavy testing can exhaust it.
 
-### Prerequisites
+## License
 
-- **Node.js**: `v18.18.0` or higher (Node 20+ recommended)
-- **npm** or **yarn** / **pnpm**
-- **Google Gemini API Key**: [Get one free from Google AI Studio](https://aistudio.google.com/app/apikey)
-- **Tavily Search API Key**: [Get one from Tavily](https://tavily.com/)
-
-### Installation
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/<your-username>/siftly.git
-   cd siftly
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment variables**:
-   Copy `.env.example` to `.env.local`:
-   ```bash
-   cp .env.example .env.local
-   ```
-   Open `.env.local` and add your API keys:
-   ```env
-   # Google Gemini API Key
-   GEMINI_API_KEY=AIzaSy...
-
-   # Tavily Search API Key
-   TAVILY_API_KEY=tvly-...
-
-   # App URL (optional, defaults to http://localhost:3000)
-   NEXT_PUBLIC_APP_URL=http://localhost:3000
-   ```
-
-> [!CAUTION]
-> Never commit your `.env.local` or push actual API keys to GitHub. The included `.gitignore` protects these automatically.
-
----
-
-## 🏃 Running the Application
-
-### Development Server
-
-Run the development server with Turbopack:
-```bash
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### Production Build
-
-Create an optimized production build:
-```bash
-npm run build
-```
-
-Start the production server:
-```bash
-npm run start
-```
-
-### Linting
-
-Check for linting and code style issues:
-```bash
-npm run lint
-```
-
----
-
-## 🔍 Example Prompts to Try
-
-- **Individual Item with Budget**:
-  - *"Recommend a salicylic acid cleanser under ₹600"*
-  - *"Find 3 mechanical keyboards with red switches under ₹3,000"*
-- **Complete Setup & Bundles**:
-  - *"I need a complete gaming setup under ₹1,00,000"*
-  - *"Minimalist home office setup under ₹40,000 with a desk and chair"*
-  - *"Basic skincare routine for oily acne-prone skin under ₹2,000"*
-- **Follow-up Interactions**:
-  - *"Make it cheaper"*
-  - *"Add a 24-inch monitor"*
-  - *"Show me more options for the keyboard"*
-
----
-
-## ⚠️ Known Limitations & Notes
-
-1. **Merchant Cloudflare / Bot Protection**:
-   - Some regional merchants (e.g., quick-commerce apps like Blinkit/Zepto) block programmatic DOM scraping. Siftly leverages Tavily's search indexes and domain parsing to verify prices and links without scraping blocked pages directly.
-2. **Catalog Turnover**:
-   - In rare cases where a retailer abruptly discontinues a SKU or rotates the product URL, Siftly falls back to a verified, retailer-scoped search page rather than serving a broken 404 link.
-
----
-
-## 📄 License
-
-This project is private and proprietary. All rights reserved.
+Private project. All rights reserved.

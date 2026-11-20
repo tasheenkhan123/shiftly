@@ -67,6 +67,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, currency, isS
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold border shadow-xs bg-blue-600 text-white border-blue-600 flex items-center gap-1">
               ★ Top pick
             </span>
+          ) : product.closeMatch ? (
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold border shadow-xs bg-amber-50 text-amber-800 border-amber-200">
+              Close match
+            </span>
           ) : product.fitsYou && product.fitsYou.length > 0 ? (
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold border shadow-xs bg-violet-50 text-violet-700 border-violet-200 flex items-center gap-1">
               <Sparkles className="w-3 h-3" /> Picked for you

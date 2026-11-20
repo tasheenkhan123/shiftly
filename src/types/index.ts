@@ -121,6 +121,8 @@ export interface ProductMatch {
   highlights?: string[];
   /** The #1 recommendation */
   isTopPick?: boolean;
+  /** Right product type, but doesn't match every preference */
+  closeMatch?: boolean;
   /** When the cheapest store isn't a well-known one: the best price at a trusted store */
   trustedOffer?: { store: string; price: number };
 }
@@ -173,6 +175,17 @@ export interface SiftlyAnalysisResult {
   assumptions?: string;
   /** One question that would help narrow the picks next time */
   followUpQuestion?: string;
+  /** What the search took and cost (see src/lib/metrics.ts) */
+  metrics?: {
+    durationMs: number;
+    serpApiCalls: number;
+    cacheHits: number;
+    geminiCalls: number;
+    geminiModels: string[];
+    products: number;
+    setup: boolean;
+    image: boolean;
+  };
   /** Tappable question for a key preference we don't know yet (e.g. skin type) */
   askPreference?: { categoryId: string; key: string; question: string; options: string[] };
 }

@@ -17,6 +17,8 @@ interface ModelSpec {
   config?: Record<string, unknown>;
 }
 
+import { currentMetrics } from '@/lib/metrics';
+
 const DEFAULT_MODELS: ModelSpec[] = [
   { name: 'gemini-3-flash-preview', config: { thinkingConfig: { thinkingLevel: 'minimal' } } },
   { name: 'gemini-3.5-flash-lite' },
@@ -96,6 +98,7 @@ export async function callGeminiJson<T = any>(
       attempt(spec)
         .then(result => {
           if (result !== null) {
+            currentMetrics()?.geminiModels.push(spec.name);
             if (Date.now() - started > 5000) console.info(`[${label}] answered by ${spec.name} after ${Date.now() - started}ms`);
             finish(result);
           }
@@ -113,6 +116,8 @@ export async function callGeminiJson<T = any>(
     };
 
     const attempt = async (spec: ModelSpec): Promise<T | null> => {
+      const m = currentMetrics();
+      if (m) m.geminiCalls++;
       const controller = new AbortController();
       controllers.push(controller);
       try {
