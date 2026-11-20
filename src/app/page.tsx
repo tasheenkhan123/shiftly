@@ -10,7 +10,7 @@ import { PriceComparisonModal } from '@/components/shopping/PriceComparisonModal
 import { SavedLooksDrawer } from '@/components/SavedLooksDrawer';
 import { PreferencesModal } from '@/components/PreferencesModal';
 import { OnboardingModal } from '@/components/OnboardingModal';
-import { CategoryIcon } from '@/components/CategoryIcon';
+import { CategoryTile } from '@/components/CategoryIcon';
 import { SELECTABLE_CATEGORIES, getCategory, type CategoryId, type PreferenceProfile } from '@/lib/categories';
 import { ChatSession, ChatMessage, ProductMatch, SearchProgressEvent } from '@/types';
 import { useAuth } from '@/lib/supabase/useAuth';
@@ -440,11 +440,11 @@ export default function HomePage() {
                       onClick={() => setSelectedCategory(on ? null : c.id)}
                       aria-pressed={on}
                       style={{ animationDelay: `${240 + i * 50}ms` }}
-                      className={`siftly-pop px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors flex items-center gap-1.5 ${
+                      className={`siftly-pop pl-1.5 pr-3 py-1.5 rounded-full text-xs font-semibold border transition-colors flex items-center gap-2 ${
                         on ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      <CategoryIcon id={c.id} className={`w-3.5 h-3.5 ${on ? 'text-white' : 'text-slate-500'}`} />
+                      <CategoryTile id={c.id} />
                       {c.label}
                     </button>
                   );

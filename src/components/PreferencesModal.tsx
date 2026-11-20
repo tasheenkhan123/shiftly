@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { X, Plus, SlidersHorizontal, Lightbulb, Trash2 } from 'lucide-react';
-import { CategoryIcon } from '@/components/CategoryIcon';
+import { CategoryTile } from '@/components/CategoryIcon';
 import {
   GLOBAL_PREFERENCE_FIELDS,
   SELECTABLE_CATEGORIES,
@@ -148,11 +148,11 @@ export const PreferencesModal: React.FC<PreferencesModalProps> = ({ isOpen, onCl
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors flex items-center gap-1.5 ${
+              className={`shrink-0 pl-1.5 pr-3 py-1 rounded-full text-xs font-semibold border transition-colors flex items-center gap-1.5 ${
                 tab === t.id ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
               }`}
             >
-              <CategoryIcon id={t.id} className="w-3.5 h-3.5" />
+              <CategoryTile id={t.id} size="sm" />
               {t.label}
               {countFor(t.id) > 0 && <span className="text-[10px] opacity-70">({countFor(t.id)})</span>}
             </button>
