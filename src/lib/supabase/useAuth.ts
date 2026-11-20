@@ -14,6 +14,7 @@ function toProfile(u: User | null | undefined): UserProfile | null {
     fullName: meta.full_name || meta.name || email.split('@')[0] || 'Siftly user',
     email,
     avatarUrl: meta.avatar_url || meta.picture,
+    shopsFor: typeof meta.shops_for === 'string' ? meta.shops_for : undefined,
     isLoggedIn: true,
   };
 }

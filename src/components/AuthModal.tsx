@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Loader2, Mail, Lock, User as UserIcon, CheckCircle2, AlertCircle } from 'lucide-react';
 import { getSupabase, isAuthConfigured, isGoogleSignInEnabled } from '@/lib/supabase/client';
+import { SHOPS_FOR_OPTIONS } from '@/lib/categories';
 
 type Mode = 'signin' | 'signup' | 'forgot' | 'reset';
 
@@ -17,6 +18,7 @@ interface AuthModalProps {
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordRecovery, onPasswordRecoveryDone }) => {
   const [mode, setMode] = useState<Mode>('signin');
   const [name, setName] = useState('');
+  const [shopsFor, setShopsFor] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -60,7 +62,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordR
         const { data, error } = await sb.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { full_name: name.trim() }, emailRedirectTo: redirectTo },
+          options: { data: { full_name: name.trim(), ...(shopsFor ? { shops_for: shopsFor } : {}) }, emailRedirectTo: redirectTo },
         });
         if (error) throw error;
         if (data.session) close();
@@ -156,6 +158,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, passwordR
             <form onSubmit={handleSubmit} className="space-y-3">
               {mode === 'signup' && (
                 <Field icon={<UserIcon className="w-4 h-4" />} type="text" placeholder="Your name" value={name} onChange={setName} autoComplete="name" />
+              )}
+              {mode === 'signup' && (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-semibold text-slate-700">
+                    I usually shop for <span className="font-normal text-slate-400">(optional)</span>
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...SHOPS_FOR_OPTIONS, 'Prefer not to say'].map(opt => {
+                      const value = opt === 'Prefer not to say' ? '' : opt;
+                      const on = shopsFor === value && (value !== '' || shopsFor === '');
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => setShopsFor(value)}
+                          className={`px-2.5 py-1 rounded-lg text-xs border ${
+                            on ? 'bg-blue-50 border-blue-300 text-blue-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-400">Helps pick clothes, shoes and fragrances. You can always ask for something else.</p>
+                </div>
               )}
               {mode !== 'reset' && (
                 <Field icon={<Mail className="w-4 h-4" />} type="email" placeholder="Email" value={email} onChange={setEmail} autoComplete="email" required />

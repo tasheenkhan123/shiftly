@@ -63,7 +63,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, currency, isS
         )}
 
         <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none">
-          {product.fitsYou && product.fitsYou.length > 0 ? (
+          {product.isTopPick ? (
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold border shadow-xs bg-blue-600 text-white border-blue-600 flex items-center gap-1">
+              ★ Top pick
+            </span>
+          ) : product.fitsYou && product.fitsYou.length > 0 ? (
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold border shadow-xs bg-violet-50 text-violet-700 border-violet-200 flex items-center gap-1">
               <Sparkles className="w-3 h-3" /> Picked for you
             </span>
@@ -105,6 +109,17 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, currency, isS
             ) : null}
           </div>
           <h3 className="font-semibold text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug">{product.title}</h3>
+
+          {product.highlights && product.highlights.length > 0 && (
+            <ul className="mt-2 space-y-0.5">
+              {product.highlights.map((h, i) => (
+                <li key={i} className="text-[11px] text-slate-700 flex gap-1.5">
+                  <span className="text-slate-400">•</span>
+                  <span>{h}</span>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {product.fitsYou && product.fitsYou.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2">

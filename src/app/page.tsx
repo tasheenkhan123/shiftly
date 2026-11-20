@@ -9,6 +9,7 @@ import { AuthModal } from '@/components/AuthModal';
 import { PriceComparisonModal } from '@/components/shopping/PriceComparisonModal';
 import { SavedLooksDrawer } from '@/components/SavedLooksDrawer';
 import { PreferencesModal } from '@/components/PreferencesModal';
+import { OnboardingModal } from '@/components/OnboardingModal';
 import { SELECTABLE_CATEGORIES, getCategory, type CategoryId, type PreferenceProfile } from '@/lib/categories';
 import { ChatSession, ChatMessage, ProductMatch, SearchProgressEvent } from '@/types';
 import { useAuth } from '@/lib/supabase/useAuth';
@@ -38,6 +39,33 @@ export default function HomePage() {
   const profileRef = useRef<PreferenceProfile>({});
   const [isPrefsOpen, setIsPrefsOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<CategoryId | null>(null);
+  const [forSomeoneElse, setForSomeoneElse] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const finishOnboarding = () => {
+    setShowOnboarding(false);
+    try {
+      if (user) localStorage.setItem(`siftly_onboarded_${user.id}`, '1');
+    } catch {}
+  };
+  const [prefsCategory, setPrefsCategory] = useState<CategoryId | undefined>(undefined);
+  // Quick questions the user skipped ("skincare.skinType"), remembered per browser
+  const [dismissedQuestions, setDismissedQuestions] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      setDismissedQuestions(JSON.parse(localStorage.getItem('siftly_dismissed_questions') || '[]'));
+    } catch {}
+  }, []);
+  const dismissQuestion = (id: string) => {
+    const next = Array.from(new Set([...dismissedQuestions, id]));
+    setDismissedQuestions(next);
+    try {
+      localStorage.setItem('siftly_dismissed_questions', JSON.stringify(next));
+    } catch {}
+  };
+  const openPreferences = (categoryId?: string) => {
+    setPrefsCategory((categoryId as CategoryId) || selectedCategory || undefined);
+    setIsPrefsOpen(true);
+  };
 
   const commitProfile = (next: PreferenceProfile) => {
     profileRef.current = next;
@@ -87,8 +115,23 @@ export default function HomePage() {
         const prefs = prefsR.status === 'fulfilled' ? prefsR.value : {};
         commitSessions(list);
         setSavedProducts(saved);
-        profileRef.current = prefs;
-        setProfile(prefs);
+        let loadedProfile: PreferenceProfile = prefs;
+        // "I usually shop for" chosen at sign-up lives in the account metadata until first load
+        if (user?.shopsFor && !loadedProfile.global?.shopsFor) {
+          loadedProfile = mergeProfile(loadedProfile, 'global', { shopsFor: user.shopsFor });
+          store.saveProfile(loadedProfile).catch(reportError);
+        }
+        profileRef.current = loadedProfile;
+        setProfile(loadedProfile);
+        // Offer the optional "get to know you" step once per account
+        if (user && prefsR.status === 'fulfilled') {
+          let seen = false;
+          try {
+            seen = localStorage.getItem(`siftly_onboarded_${user.id}`) === '1';
+          } catch {}
+          const hasPersonalInfo = Object.entries(loadedProfile).some(([k, v]) => k !== 'global' && v && Object.keys(v).length > 0);
+          if (!seen && !hasPersonalInfo) setShowOnboarding(true);
+        }
         setActiveSessionId(list[0]?.id ?? null);
       } catch (err) {
         if (!cancelled) reportError(err);
@@ -127,6 +170,7 @@ export default function HomePage() {
   const handleNewChat = () => {
     setActiveSessionId(null);
     setSelectedCategory(null);
+    setForSomeoneElse(false);
     setSidebarOpen(false);
   };
 
@@ -204,6 +248,7 @@ export default function HomePage() {
           conversationHistory: history,
           profile: profileRef.current,
           category: selectedCategory || undefined,
+          forSomeoneElse,
         }),
       });
       if (!res.ok || !res.body) {
@@ -301,7 +346,7 @@ export default function HomePage() {
         onTogglePin={handleTogglePin}
         user={user}
         onOpenAuth={() => setIsAuthOpen(true)}
-        onOpenPreferences={() => setIsPrefsOpen(true)}
+        onOpenPreferences={() => openPreferences()}
         onSignOut={signOut}
       />
 
@@ -395,6 +440,23 @@ export default function HomePage() {
                 onOpenPriceComparison={setActiveModalProduct}
                 onToggleSave={handleToggleSaveProduct}
                 savedProductIds={savedKeys}
+                onEditPreferences={openPreferences}
+                isQuestionHidden={(categoryId, key) =>
+                  dismissedQuestions.includes(`${categoryId}.${key}`)
+                }
+                isPreferenceKnown={(categoryId, key) => Boolean(profile[categoryId as CategoryId]?.[key])}
+                onAnswerPreference={(categoryId, key, value) => {
+                  const next = mergeProfile(profileRef.current, categoryId, { [key]: value });
+                  commitProfile(next);
+                  store.saveProfile(next).catch(reportError);
+                }}
+                onDismissQuestion={(categoryId, key) => dismissQuestion(`${categoryId}.${key}`)}
+                onRedoSearch={() => {
+                  // Re-run the user message that produced this answer, now with the new preference
+                  const idx = currentMessages.findIndex(m => m.id === msg.id);
+                  const prevUser = [...currentMessages.slice(0, idx)].reverse().find(m => m.sender === 'user');
+                  if (prevUser?.text && !prevUser.mediaUrl) handleSendMessage(prevUser.text);
+                }}
               />
             ))
           )}
@@ -408,6 +470,8 @@ export default function HomePage() {
             onSend={handleSendMessage}
             isLoading={isLoading}
             placeholder={selectedCategory ? `e.g. ${getCategory(selectedCategory).example}` : undefined}
+            forSomeoneElse={forSomeoneElse}
+            onToggleForSomeoneElse={() => setForSomeoneElse(v => !v)}
           />
         </div>
       </div>
@@ -421,12 +485,25 @@ export default function HomePage() {
 
       <PriceComparisonModal product={activeModalProduct} currency="INR" onClose={() => setActiveModalProduct(null)} />
 
+      <OnboardingModal
+        isOpen={showOnboarding}
+        name={user?.fullName}
+        initial={profile}
+        onSkip={finishOnboarding}
+        onSave={next => {
+          commitProfile(next);
+          store.saveProfile(next).catch(reportError);
+          finishOnboarding();
+          setNotice('Thanks! Your picks will now be personalised.');
+        }}
+      />
+
       <PreferencesModal
         isOpen={isPrefsOpen}
         onClose={() => setIsPrefsOpen(false)}
         profile={profile}
         signedIn={Boolean(user)}
-        initialCategory={selectedCategory || undefined}
+        initialCategory={prefsCategory}
         onSave={next => {
           commitProfile(next);
           store.saveProfile(next).catch(reportError);

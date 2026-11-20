@@ -18,6 +18,11 @@ export interface PreferenceField {
   /** Suggested values shown as chips in the preferences panel; free text is also allowed */
   options?: string[];
   placeholder?: string;
+  /**
+   * true = remember automatically when the user says it in chat (stable facts like skin type or shoe size).
+   * Per-search details (occasion, use, who it's for) are never auto-remembered: "perfume for men" is often a gift.
+   */
+  autoRemember?: boolean;
 }
 
 export interface BrandGroup {
@@ -36,6 +41,10 @@ export interface CategoryDef {
   guidance: string;
   brandGroups: BrandGroup[];
   trustedStores: string[];
+  /** Does "I usually shop for: Women's / Men's" matter here? (not for earbuds or air fryers) */
+  genderRelevant?: boolean;
+  /** The one preference worth asking about after a first search in this category */
+  keyQuestion?: { key: string; question: string };
 }
 
 const COMMON_TRUSTED = ['Amazon', 'Flipkart'];
@@ -47,9 +56,9 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: '🧴',
     example: 'Face wash for oily, acne-prone skin under ₹500',
     preferenceFields: [
-      { key: 'skinType', label: 'Skin type', options: ['Oily', 'Dry', 'Combination', 'Normal', 'Sensitive'] },
-      { key: 'concerns', label: 'Skin concerns', options: ['Acne', 'Pigmentation', 'Dullness', 'Large pores', 'Ageing', 'Redness'] },
-      { key: 'avoid', label: 'Avoid', options: ['Fragrance', 'Alcohol', 'Essential oils', 'Parabens'] },
+      { key: 'skinType', label: 'Skin type', options: ['Oily', 'Dry', 'Combination', 'Normal', 'Sensitive'], autoRemember: true },
+      { key: 'concerns', label: 'Skin concerns', options: ['Acne', 'Pigmentation', 'Dullness', 'Large pores', 'Ageing', 'Redness'], autoRemember: true },
+      { key: 'avoid', label: 'Avoid', options: ['Fragrance', 'Alcohol', 'Essential oils', 'Parabens'], autoRemember: true },
       { key: 'brandStyle', label: 'Brand preference', options: ['K-beauty', 'Indian brands', 'Clean / natural', 'Dermatologist brands'] },
     ],
     guidance: `Skincare expertise:
@@ -82,6 +91,8 @@ export const CATEGORIES: CategoryDef[] = [
       },
     ],
     trustedStores: [...COMMON_TRUSTED, 'Nykaa', 'Tira', 'Purplle', 'Myntra', 'Tata 1mg', 'Apollo', 'Official brand store'],
+    genderRelevant: false,
+    keyQuestion: { key: 'skinType', question: "What's your skin type?" },
   },
   {
     id: 'makeup',
@@ -89,10 +100,10 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: '💄',
     example: 'Long-lasting matte lipstick for wheatish skin under ₹800',
     preferenceFields: [
-      { key: 'skinTone', label: 'Skin tone', options: ['Fair', 'Light', 'Wheatish', 'Medium', 'Dusky', 'Deep'] },
-      { key: 'undertone', label: 'Undertone', options: ['Warm', 'Cool', 'Neutral'] },
+      { key: 'skinTone', label: 'Skin tone', options: ['Fair', 'Light', 'Wheatish', 'Medium', 'Dusky', 'Deep'], autoRemember: true },
+      { key: 'undertone', label: 'Undertone', options: ['Warm', 'Cool', 'Neutral'], autoRemember: true },
       { key: 'finish', label: 'Finish', options: ['Matte', 'Dewy', 'Natural', 'Satin'] },
-      { key: 'skinType', label: 'Skin type', options: ['Oily', 'Dry', 'Combination', 'Normal', 'Sensitive'] },
+      { key: 'skinType', label: 'Skin type', options: ['Oily', 'Dry', 'Combination', 'Normal', 'Sensitive'], autoRemember: true },
     ],
     guidance: `Makeup expertise:
 - Match shades to skin tone and undertone when known; say which shade to pick if the listing shows shades.
@@ -116,6 +127,8 @@ export const CATEGORIES: CategoryDef[] = [
       },
     ],
     trustedStores: [...COMMON_TRUSTED, 'Nykaa', 'Tira', 'Purplle', 'Myntra', 'Sephora', 'Official brand store'],
+    genderRelevant: false,
+    keyQuestion: { key: 'skinTone', question: "What's your skin tone?" },
   },
   {
     id: 'footwear',
@@ -123,10 +136,10 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: '👟',
     example: 'Running shoes for flat feet, size UK 9, under ₹4,000',
     preferenceFields: [
-      { key: 'shoeSize', label: 'Shoe size', placeholder: 'e.g. UK 9' },
+      { key: 'shoeSize', label: 'Shoe size', placeholder: 'e.g. UK 9', autoRemember: true },
       { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex', 'Kids'] },
       { key: 'use', label: 'Mostly for', options: ['Running', 'Gym', 'Walking', 'Casual', 'Office', 'Sports'] },
-      { key: 'footType', label: 'Foot type', options: ['Flat feet', 'High arch', 'Wide feet', 'Normal'] },
+      { key: 'footType', label: 'Foot type', options: ['Flat feet', 'High arch', 'Wide feet', 'Normal'], autoRemember: true },
     ],
     guidance: `Footwear expertise:
 - Match the shoe to its use: running shoes need cushioning and breathable uppers; gym/training shoes need a flat, stable sole; walking shoes need comfort and grip.
@@ -145,6 +158,8 @@ export const CATEGORIES: CategoryDef[] = [
       },
     ],
     trustedStores: [...COMMON_TRUSTED, 'Myntra', 'Ajio', 'Decathlon', 'Nykaa Fashion', 'Tata CLiQ', 'Official brand store'],
+    genderRelevant: true,
+    keyQuestion: { key: 'footType', question: 'Do you have a particular foot type?' },
   },
   {
     id: 'fashion',
@@ -153,8 +168,8 @@ export const CATEGORIES: CategoryDef[] = [
     example: 'Linen shirt for men, size M, for office, under ₹1,500',
     preferenceFields: [
       { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex', 'Kids'] },
-      { key: 'size', label: 'Clothing size', options: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
-      { key: 'fit', label: 'Fit', options: ['Slim', 'Regular', 'Relaxed', 'Oversized'] },
+      { key: 'size', label: 'Clothing size', options: ['XS', 'S', 'M', 'L', 'XL', 'XXL'], autoRemember: true },
+      { key: 'fit', label: 'Fit', options: ['Slim', 'Regular', 'Relaxed', 'Oversized'], autoRemember: true },
       { key: 'style', label: 'Style', options: ['Casual', 'Office', 'Ethnic', 'Party', 'Streetwear', 'Minimal'] },
     ],
     guidance: `Fashion expertise:
@@ -174,6 +189,8 @@ export const CATEGORIES: CategoryDef[] = [
       },
     ],
     trustedStores: [...COMMON_TRUSTED, 'Myntra', 'Ajio', 'Nykaa Fashion', 'Tata CLiQ', 'Westside', 'Official brand store'],
+    genderRelevant: true,
+    keyQuestion: { key: 'fit', question: 'What fit do you usually prefer?' },
   },
   {
     id: 'electronics',
@@ -181,7 +198,7 @@ export const CATEGORIES: CategoryDef[] = [
     emoji: '📱',
     example: 'Wireless earbuds with good bass for the gym under ₹2,000',
     preferenceFields: [
-      { key: 'ecosystem', label: 'Phone', options: ['Android', 'iPhone'] },
+      { key: 'ecosystem', label: 'Phone', options: ['Android', 'iPhone'], autoRemember: true },
       { key: 'priority', label: 'Most important', options: ['Battery life', 'Performance', 'Camera', 'Sound quality', 'Build quality', 'Value for money'] },
       { key: 'brandStyle', label: 'Brand preference', options: ['Indian brands', 'Global brands', 'No preference'] },
     ],
@@ -202,21 +219,25 @@ export const CATEGORIES: CategoryDef[] = [
       },
     ],
     trustedStores: [...COMMON_TRUSTED, 'Croma', 'Reliance Digital', 'Vijay Sales', 'Tata CLiQ', 'Official brand store'],
+    genderRelevant: false,
+    keyQuestion: { key: 'ecosystem', question: 'Which phone do you use?' },
   },
   {
     id: 'perfumes',
     label: 'Perfumes',
     emoji: '🌸',
-    example: 'Long-lasting fresh perfume for men for daily office use under ₹2,500',
+    example: 'Fruity, citrusy body mist from Bath & Body Works',
     preferenceFields: [
       { key: 'gender', label: 'For', options: ['Men', 'Women', 'Unisex'] },
-      { key: 'scent', label: 'Scent you like', options: ['Fresh', 'Citrus', 'Woody', 'Floral', 'Sweet', 'Spicy', 'Aquatic', 'Musky'] },
+      { key: 'scent', label: 'Scent you like', options: ['Fresh', 'Citrus', 'Fruity', 'Woody', 'Floral', 'Sweet', 'Spicy', 'Aquatic', 'Musky'] },
       { key: 'occasion', label: 'Mostly for', options: ['Daily / office', 'Evening / party', 'Gym', 'Special occasions'] },
     ],
     guidance: `Perfume expertise:
 - Match the scent family and occasion: fresh/citrus/aquatic for daytime and Indian heat; woody/spicy/sweet for evenings.
 - Prefer Eau de Parfum (EDP) for longevity over Eau de Toilette (EDT) when the customer wants long-lasting.
-- Avoid "tester" and unbranded "inspired by" listings unless the customer asks for them; prefer sealed originals from trusted stores.`,
+- Avoid "tester" and unbranded "inspired by" listings unless the customer asks for them; prefer sealed originals from trusted stores.
+- Body mists (e.g. Bath & Body Works Fine Fragrance Mist, Victoria's Secret mists) are a different product from perfumes/colognes: if a mist is asked for, pick mists. Name the scent and its key notes.
+- Don't assume the customer's gender. Only pick men's or women's fragrances if they said so in THIS request or it is clear from the request.`,
     brandGroups: [
       {
         phrases: ['indian brand', 'indian brands', 'affordable'],
@@ -229,7 +250,9 @@ export const CATEGORIES: CategoryDef[] = [
         brands: ['Dior', 'Chanel', 'Versace', 'Armani', 'Davidoff', 'Calvin Klein', 'Hugo Boss', 'Montblanc', 'Paco Rabanne', 'Carolina Herrera', 'Yves Saint Laurent', 'Burberry'],
       },
     ],
-    trustedStores: [...COMMON_TRUSTED, 'Nykaa', 'Tira', 'Myntra', 'Perfume Booth', 'Official brand store'],
+    trustedStores: [...COMMON_TRUSTED, 'Nykaa', 'Tira', 'Myntra', 'Perfume Booth', 'Bath & Body Works', 'Official brand store'],
+    genderRelevant: true,
+    keyQuestion: { key: 'scent', question: 'Which scents do you usually like?' },
   },
   {
     id: 'other',
@@ -244,7 +267,10 @@ export const CATEGORIES: CategoryDef[] = [
 ];
 
 /** Global preferences that apply to every category */
+export const SHOPS_FOR_OPTIONS = ["Women's", "Men's", 'Both'];
+
 export const GLOBAL_PREFERENCE_FIELDS: PreferenceField[] = [
+  { key: 'shopsFor', label: 'I usually shop for', options: SHOPS_FOR_OPTIONS },
   { key: 'budgetStyle', label: 'Budget style', options: ['Best value', 'Mid-range', 'Premium'] },
   { key: 'stores', label: 'Stores I trust', placeholder: 'e.g. Amazon, Nykaa' },
 ];
@@ -286,6 +312,7 @@ export function describePreferences(profile: PreferenceProfile | undefined, cate
   for (const [scope, values] of [[categoryId, profile[categoryId]], ['global', profile.global]] as const) {
     for (const [k, v] of Object.entries(values || {})) {
       if (!v || !String(v).trim()) continue;
+      if (k === 'shopsFor' && (!cat.genderRelevant || v === 'Both')) continue; // irrelevant for earbuds etc.
       const label = fields.find(f => f.key === k)?.label || k;
       out.push(`${label}: ${v}${scope === 'global' ? '' : ''}`);
     }

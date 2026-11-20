@@ -100,14 +100,16 @@ async function serpApiGet(params: Record<string, string>, timeoutMs = 20000): Pr
 /** Google returns some store links as relative redirects ("/goto?url=..."); make them absolute. */
 function absoluteLink(link: string): string {
   try {
-    return new URL(link, 'https://www.google.co.in').toString();
+    const u = new URL(link, 'https://www.google.co.in');
+    if (u.protocol === 'http:') u.protocol = 'https:'; // e.g. Myntra links; buttons only allow https
+    return u.toString();
   } catch {
     return link;
   }
 }
 
 /** Stores that ship from outside India show converted, inflated prices; keep them out of the comparison. */
-const FOREIGN_STORE = /desertcart|ubuy|\.ae\b|\.sa\b|\.qa\b|\.kw\b|\.om\b|\.bh\b|\.co\.uk\b|\.com\.au\b/i;
+const FOREIGN_STORE = /desertcart|ubuy|gosupps|etsy|\.ae\b|\.sa\b|\.qa\b|\.kw\b|\.om\b|\.bh\b|\.co\.uk\b|\.com\.au\b/i;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
@@ -193,6 +195,7 @@ interface Pick {
   brand: string;
   reason: string;
   fitsYou?: string[];
+  highlights?: string[];
 }
 
 function normTitle(t: string): string {
@@ -233,6 +236,7 @@ async function pickBestListings(
     userPreferences: string[];
     brandFilter: string[];
     brandGroupLabel?: string;
+    suggestedProducts: string[];
   },
   geminiKey: string
 ): Promise<Pick[]> {
@@ -253,6 +257,7 @@ Budget per item: ${ctx.budgetMax ? `up to ₹${ctx.budgetMax}` : 'not specified'
 What this customer told us about themselves: ${ctx.userPreferences.length ? ctx.userPreferences.join('; ') : 'nothing yet'}
 Other preferences for this search: ${ctx.preferences.length ? ctx.preferences.join(', ') : 'none'}
 ${ctx.brandFilter.length ? `Brands: the customer wants ${ctx.brandGroupLabel || 'specific'} brands only (${ctx.brandFilter.slice(0, 20).join(', ')}). Reject other brands.\n` : ''}
+${ctx.suggestedProducts.length ? `Expert shortlist for this request (prefer these when they appear below and fit): ${ctx.suggestedProducts.join('; ')}\n` : ''}
 ${cat.guidance}
 
 Below are REAL Google Shopping listings. Pick the ${ctx.count} best ones for this customer.
@@ -270,7 +275,7 @@ Rules:
 Listings:
 ${lines}
 
-Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one short sentence on why it suits THIS customer, tied to what they told us when relevant (e.g. 'Gel texture with salicylic acid that controls oil without drying'). Do NOT mention any price or store name, because prices are shown separately and differ per store.","fitsYou":["up to 3 very short tags linking the product to the customer, e.g. 'Oily skin: oil-free gel', 'K-beauty'. Use [] if the customer told us nothing."]}]}`;
+Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one short sentence on why it suits THIS customer, tied to what they told us when relevant (e.g. 'Gel texture with salicylic acid that controls oil without drying'). Do NOT mention any price or store name, because prices are shown separately and differ per store.","fitsYou":["up to 3 very short tags linking the product to the customer, e.g. 'Oily skin: oil-free gel', 'K-beauty'. Use [] if the customer told us nothing."],"highlights":["up to 3 concrete facts about THIS product from your knowledge: scent notes for fragrances (e.g. 'Juicy pear', 'Sparkling clementine'), key ingredients for skincare, key specs for electronics, material for clothes. Never ratings, popularity, price or words like 'recommended'. [] if unsure."]}]}`;
 
   const parsed = await callGeminiJson<{ picks?: Pick[] }>(prompt, geminiKey, { label: 'shopping-pick', totalTimeoutMs: 14000 });
   // Gemini returns either {"picks":[...]} or a bare [...] array
@@ -284,7 +289,13 @@ Respond with JSON: {"picks":[{"index":number,"brand":"brand name","reason":"one 
     const fitsYou = Array.isArray(p.fitsYou)
       ? p.fitsYou.filter((x: unknown): x is string => typeof x === 'string' && x.trim().length > 0).map((x: string) => x.trim().slice(0, 48)).slice(0, 3)
       : [];
-    unique.push({ index, brand: str(p.brand) || '', reason: str(p.reason) || '', fitsYou });
+    const highlights = Array.isArray(p.highlights)
+      ? p.highlights
+          .filter((x: unknown): x is string => typeof x === 'string' && x.trim().length > 0)
+          // drop filler that isn't a product fact
+          .filter((x: string) => !/rated|rating|review|recommend|shortlist|popular|best ?seller|budget|price|value for money|gift/i.test(x)).map((x: string) => x.trim().slice(0, 40)).slice(0, 3)
+      : [];
+    unique.push({ index, brand: str(p.brand) || '', reason: str(p.reason) || '', fitsYou, highlights });
     if (unique.length === ctx.count) break;
   }
   if (unique.length === 0) {
@@ -384,18 +395,26 @@ export interface GoogleShoppingSearchParams {
   /** Only these brands (explicit, or expanded from a group like K-beauty) */
   brandFilter?: string[];
   brandGroupLabel?: string;
+  /** Specific products Gemini suggested; each is searched by name so well-known items aren't missed */
+  suggestedProducts?: string[];
+  /** Plain product type, used to search a named brand's own catalog ("Bath & Body Works fine fragrance mist") */
+  productType?: string;
 }
 
 function normBrand(b: string): string {
   return b.toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-/** Does this listing belong to one of the brands? (title starts with / contains the brand name) */
-function matchesBrand(title: string, brands: string[]): boolean {
+/**
+ * Does this listing belong to one of the brands? True when the title contains the brand name, or the
+ * seller IS the brand (official stores often drop the brand from titles: "Always Fleur Fine Fragrance Mist").
+ */
+function matchesBrand(title: string, brands: string[], source = ''): boolean {
   const t = ` ${normBrand(title)} `;
+  const src = normBrand(source);
   return brands.some(b => {
     const nb = normBrand(b);
-    return nb.length >= 2 && t.includes(` ${nb} `);
+    return nb.length >= 2 && (t.includes(` ${nb} `) || src === nb || src.startsWith(`${nb} `));
   });
 }
 
@@ -404,7 +423,41 @@ export async function findProductsOnGoogleShopping(
 ): Promise<{ matches: ProductMatch[]; listingsFound: number }> {
   const categoryId: CategoryId = p.categoryId || 'other';
   const brandFilter = p.brandFilter || [];
-  let listings = await searchGoogleShopping(p.shoppingQuery, { maxPrice: p.budgetMax });
+  // When the customer names a specific brand (not a group like K-beauty), search that brand's catalog for the
+  // plain product type. Descriptive queries ("BBW fruity citrus mist") mostly return overseas importers, while
+  // "Bath & Body Works fine fragrance mist" returns the brand's official India store. Gemini then picks the
+  // right scents/variants from the real catalog.
+  const explicitBrands = !p.brandGroupLabel && brandFilter.length > 0 && brandFilter.length <= 2 ? brandFilter : [];
+  const catalogQueries = p.productType ? explicitBrands.map(b => `${b} ${p.productType}`) : [];
+  // Plus up to 3 searches for specific products the expert step suggested, all in parallel
+  const suggested = (p.suggestedProducts || []).slice(0, explicitBrands.length ? 2 : 3);
+  const extraQueries = [...catalogQueries, ...suggested];
+  if (extraQueries.length) console.info(`[google-shopping] also searching: ${extraQueries.join(' | ')}`);
+  const [mainResult, ...suggestedResults] = await Promise.allSettled([
+    searchGoogleShopping(p.shoppingQuery, { maxPrice: p.budgetMax }),
+    ...extraQueries.map(q => searchGoogleShopping(q, { maxPrice: p.budgetMax })),
+  ]);
+  if (mainResult.status === 'rejected') throw mainResult.reason;
+  let listings = mainResult.value;
+  {
+    const seenTitles = new Set(listings.map(l => normTitle(l.title)));
+    // Catalog results first (top 20), then suggested products (top 6 each), then the main query
+    const extra: ShoppingListing[] = [];
+    for (const [i, r] of suggestedResults.entries()) {
+      if (r.status !== 'fulfilled') continue;
+      const take = i < catalogQueries.length ? 20 : 6;
+      for (const l of r.value.filter(x => !FOREIGN_STORE.test(x.source)).slice(0, take)) {
+        const key = normTitle(l.title);
+        if (!seenTitles.has(key)) {
+          seenTitles.add(key);
+          extra.push(l);
+        }
+      }
+    }
+    listings = [...extra, ...listings];
+  }
+  // Overseas importers (desertcart, ubuy) list inflated import prices: never recommend them as the main listing
+  listings = listings.filter(l => !FOREIGN_STORE.test(l.source));
 
   const excluded = p.excludeTitles.map(normTitle).filter(Boolean);
   const usable = (list: ShoppingListing[]) =>
@@ -414,14 +467,14 @@ export async function findProductsOnGoogleShopping(
         const t = normTitle(l.title);
         return !excluded.some(ex => t.includes(ex) || ex.includes(t));
       })
-      .filter(l => brandFilter.length === 0 || matchesBrand(l.title, brandFilter));
+      .filter(l => brandFilter.length === 0 || matchesBrand(l.title, brandFilter, l.source));
 
   let eligible = usable(listings);
 
   // Brand-restricted searches (e.g. "K-beauty") often return few matching listings from a generic query.
   // Search the top brands directly, at most 2 extra searches (cached, so repeats are free).
   if (brandFilter.length > 0 && eligible.length < p.count * 2) {
-    const present = new Set(eligible.map(l => brandFilter.find(b => matchesBrand(l.title, [b]))).filter(Boolean));
+    const present = new Set(eligible.map(l => brandFilter.find(b => matchesBrand(l.title, [b], l.source))).filter(Boolean));
     const productWords = p.target.replace(/k-?\s?beauty|korean|japanese|j-beauty|indian brands?|brands?/gi, '').trim() || p.target;
     const extraBrands = brandFilter.filter(b => !present.has(b)).slice(0, 2);
     if (extraBrands.length) {
@@ -458,6 +511,7 @@ export async function findProductsOnGoogleShopping(
       userPreferences: p.userPreferences || [],
       brandFilter,
       brandGroupLabel: p.brandGroupLabel,
+      suggestedProducts: suggested,
     },
     p.geminiKey
   );
@@ -541,6 +595,8 @@ export async function findProductsOnGoogleShopping(
         matchReasons: [pick.reason || 'Listed on Google Shopping', `Price from Google Shopping, checked ${checkedAt}`],
         whyPicked: pick.reason || undefined,
         fitsYou: pick.fitsYou && pick.fitsYou.length ? pick.fitsYou : undefined,
+        highlights: pick.highlights && pick.highlights.length ? pick.highlights : undefined,
+        isTopPick: idx === 0,
         trustedOffer,
         scoreBreakdown: {
           visualSimilarity: 0,

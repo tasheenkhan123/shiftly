@@ -24,6 +24,8 @@ export interface PersonalizationInput {
   categoryHint?: CategoryId;
   /** The user's saved preference profile */
   profile?: PreferenceProfile;
+  /** "For someone else" switch: don't use the user's own profile */
+  forSomeoneElse?: boolean;
 }
 
 export type ProgressFn = (stage: SearchProgressEvent['stage'], message: string) => void;
@@ -71,6 +73,15 @@ export interface ParsedShoppingIntent {
   brandGroupLabel?: string;
   /** Assumptions Siftly made, e.g. "₹3,000 treated as the budget per product" */
   assumptions?: string | null;
+  /** Specific products Gemini would recommend from its own knowledge; we search for each to get real prices */
+  suggestedProducts: string[];
+  followUpQuestion?: string | null;
+  /** Plain product type without brand or attributes, e.g. "fine fragrance mist" */
+  productType?: string | null;
+  forSomeoneElse?: boolean;
+  forWho?: string | null;
+  /** A quick question worth asking after this search (key preference not known yet) */
+  askPreference?: { categoryId: CategoryId; key: string; question: string; options: string[] } | null;
 }
 
 export interface ExtractedProductCandidate {
@@ -465,9 +476,11 @@ export async function understandShoppingQuery(
   personal: PersonalizationInput = {}
 ): Promise<ParsedShoppingIntent> {
   const image = imagePartFromDataUrl(imageDataUrl);
-  const profileText = personal.profile && Object.keys(personal.profile).length
-    ? JSON.stringify(personal.profile)
-    : 'none saved';
+  const profileText = personal.forSomeoneElse
+    ? 'NOT USED: the customer said they are shopping for someone else'
+    : personal.profile && Object.keys(personal.profile).length
+      ? JSON.stringify(personal.profile)
+      : 'none saved';
   const categoryFieldsText = CATEGORIES.filter(c => c.preferenceFields.length)
     .map(c => `- ${c.id}: ${c.preferenceFields.map(f => f.key + (f.options ? ` (${f.options.join('/')})` : '')).join(', ')}`)
     .join('\n');
@@ -496,6 +509,8 @@ ${personal.categoryHint ? `The customer selected the category: ${personal.catego
 CUSTOMER PROFILE (preferences saved from earlier chats, JSON by category): ${profileText}
 - Apply saved preferences that are relevant to this request (e.g. saved skinType for any skincare search, saved shoeSize for footwear).
 - Anything the customer says now overrides the saved profile.
+- "shopsFor" (Women's / Men's) is only a DEFAULT for gender-specific products (clothes, shoes, fragrances, watches). If this request says otherwise ("perfume for men", "for my brother"), follow the request. Never use it for gender-neutral products.
+- GIFTS / SOMEONE ELSE: if the customer is shopping for another person ("gift for my dad", "for my sister", "for my boyfriend"), set "forSomeoneElse": true and DO NOT apply the saved profile (their skin type, sizes, shopsFor are about themselves, not the other person).
 ${image ? `
 AN IMAGE IS ATTACHED (a screenshot or photo from the customer). Look at it carefully:
 - Identify the main product shown: brand (read any logo or label text), exact product name/model, product type, colour, size/variant.
@@ -522,7 +537,10 @@ CRITICAL REASONING RULES:
      - Default requestedCount is 3.
 
 2. CONVERSATIONAL UNDERSTANDING & FOLLOW-UPS:
-   - If the user query is a follow-up (e.g. "make it cheaper", "I have oily skin", "give me two more options", "add a monitor", "fragrance-free"):
+   - FIRST decide: is this a FOLLOW-UP that modifies the previous search, or a NEW SEARCH?
+     - NEW SEARCH = it names a different product, brand, scent, or category than before (e.g. after "men's office perfume", the message "fruity citrus mist from Bath & Body Works" is a NEW search).
+     - For a NEW SEARCH, do NOT carry over the previous budget, gender, occasion, or other details. Use only what this message says (plus relevant saved profile facts like skin type).
+   - If the user query is a follow-up (e.g. "make it cheaper", "I have oily skin", "give me two more options", "add a monitor", "fragrance-free", "in mists", "under 1000"):
      - Maintain the context of the previous conversation (category, target item, previous products, previous budget).
      - "make it cheaper": reduce the budget and search for more affordable/budget-friendly alternatives for the same product or setup.
      - "I have oily skin" / "fragrance-free": apply this preference to the existing product or setup.
@@ -566,7 +584,12 @@ Output strictly valid JSON matching this schema:
   "imageDescription": "what the attached image shows, or null if no image",
   "categoryId": "one of: skincare | makeup | footwear | fashion | electronics | perfumes | other",
   "preferences": { "fieldKey": "value" },
-  "assumptions": "one short sentence about any important assumption you made (e.g. 'I treated ₹3,000 as the budget for each product'), or null"
+  "assumptions": "one short sentence about any important assumption you made (e.g. 'I treated ₹3,000 as the budget for each product'), or null",
+  "forSomeoneElse": boolean,
+  "forWho": "who it's for if someone else, e.g. 'Dad', 'Sister', or null",
+  "productType": "the plain product type only, 1-4 words, no brand, no scent/colour/feature words (e.g. 'fine fragrance mist', 'face wash', 'running shoes', 'wireless earbuds')",
+  "suggestedProducts": ["up to 4 SPECIFIC product names you, as an expert, would recommend for this exact request, e.g. 'Bath & Body Works Gingham Fresh Fine Fragrance Mist'. Only real products you are confident exist and are sold in India. [] if the request is generic or you are unsure."],
+  "followUpQuestion": "one short question that would help narrow the picks next time (e.g. 'Do you prefer juicy fruity like pear and citrus, or sweet fruity like strawberry and peach?'), or null"
 }
 
 PREFERENCES TO REMEMBER ("preferences"):
@@ -640,15 +663,33 @@ function personalise(
   rawInput: string,
   history: ConversationTurn[] | undefined,
   personal: PersonalizationInput
-): Pick<ParsedShoppingIntent, 'categoryId' | 'learnedPreferences' | 'activePreferences' | 'brandFilter' | 'brandGroupLabel' | 'assumptions'> {
+): Pick<
+  ParsedShoppingIntent,
+  | 'categoryId'
+  | 'learnedPreferences'
+  | 'activePreferences'
+  | 'brandFilter'
+  | 'brandGroupLabel'
+  | 'assumptions'
+  | 'suggestedProducts'
+  | 'followUpQuestion'
+  | 'productType'
+  | 'forSomeoneElse'
+  | 'forWho'
+  | 'askPreference'
+> {
   const validIds = CATEGORIES.map(c => c.id) as string[];
   const categoryId = (validIds.includes(parsed?.categoryId) ? parsed.categoryId : personal.categoryHint || 'other') as CategoryId;
   const cat = getCategory(categoryId);
 
-  // Keep only known fields with short string values
+  const forSomeoneElse = Boolean(personal.forSomeoneElse || parsed?.forSomeoneElse === true);
+  const forWho = typeof parsed?.forWho === 'string' && parsed.forWho.trim() ? parsed.forWho.trim().slice(0, 30) : null;
+
+  // Keep only known fields with short string values (never learn from gift searches: it's about someone else)
   const learned: Record<string, string> = {};
-  if (parsed?.preferences && typeof parsed.preferences === 'object') {
+  if (!forSomeoneElse && parsed?.preferences && typeof parsed.preferences === 'object') {
     for (const f of cat.preferenceFields) {
+      if (!f.autoRemember) continue; // per-search details (occasion, who it's for) are not remembered
       const v = parsed.preferences[f.key];
       if (typeof v === 'string' && v.trim() && v.length <= 60) learned[f.key] = v.trim();
       else if (Array.isArray(v) && v.length) learned[f.key] = v.filter(x => typeof x === 'string').join(', ').slice(0, 60);
@@ -674,10 +715,27 @@ function personalise(
   return {
     categoryId,
     learnedPreferences: learned,
-    activePreferences: describePreferences(mergedProfile, categoryId),
+    activePreferences: forSomeoneElse
+      ? [`Shopping for: ${forWho || 'someone else'}`]
+      : describePreferences(mergedProfile, categoryId),
+    forSomeoneElse,
+    forWho,
+    askPreference: (() => {
+      // Ask about the category's key preference once, if we don't know it (and it's not a gift search)
+      const kq = cat.keyQuestion;
+      if (!kq || forSomeoneElse || mergedProfile[categoryId]?.[kq.key]) return null;
+      const field = cat.preferenceFields.find(f => f.key === kq.key);
+      if (!field?.options?.length) return null;
+      return { categoryId, key: kq.key, question: kq.question, options: field.options };
+    })(),
     brandFilter,
     brandGroupLabel: groups.map(g => g.label).join(' / ') || undefined,
     assumptions: typeof parsed?.assumptions === 'string' && parsed.assumptions.trim() ? parsed.assumptions.trim() : null,
+    suggestedProducts: Array.isArray(parsed?.suggestedProducts)
+      ? parsed.suggestedProducts.filter((x: unknown): x is string => typeof x === 'string' && x.trim().length > 3).map((x: string) => x.trim().slice(0, 90)).slice(0, 4)
+      : [],
+    followUpQuestion: typeof parsed?.followUpQuestion === 'string' && parsed.followUpQuestion.trim() ? parsed.followUpQuestion.trim().slice(0, 200) : null,
+    productType: typeof parsed?.productType === 'string' && parsed.productType.trim() ? parsed.productType.trim().slice(0, 40) : null,
   };
 }
 
@@ -1601,6 +1659,14 @@ export async function searchProductsWithTavilyAndGemini(
   }
 }
 
+/** "Picked for you" chips: active preferences plus a brand group like K-beauty (without repeating it) */
+function personalTags(parsedIntent: ParsedShoppingIntent): string[] {
+  const label = parsedIntent.brandGroupLabel;
+  const tags = [...parsedIntent.activePreferences];
+  if (label && !tags.some(t => t.toLowerCase().includes(label.toLowerCase()))) tags.push(`Brands: ${label}`);
+  return tags;
+}
+
 /**
  * Honest bundle summary: totals only count confirmed prices and only claim "fits budget" when it does.
  */
@@ -1654,6 +1720,8 @@ async function runGoogleShoppingFlow(
     userPreferences: parsedIntent.activePreferences,
     brandFilter: parsedIntent.brandFilter,
     brandGroupLabel: parsedIntent.brandGroupLabel,
+    suggestedProducts: parsedIntent.suggestedProducts,
+    productType: parsedIntent.productType || undefined,
     excludeTitles: parsedIntent.excludedProductTitles || [],
     geminiKey: geminiApiKey,
   };
@@ -1684,8 +1752,10 @@ async function runGoogleShoppingFlow(
     executionTimeMs: Date.now() - startTime,
     categoryId: parsedIntent.categoryId,
     learnedPreferences: parsedIntent.learnedPreferences,
-    activePreferences: parsedIntent.activePreferences,
+    activePreferences: personalTags(parsedIntent),
     assumptions: parsedIntent.assumptions || undefined,
+    followUpQuestion: parsedIntent.followUpQuestion || undefined,
+    askPreference: parsedIntent.askPreference || undefined,
   });
 
   // ---- Setup / bundle ----
@@ -1756,22 +1826,12 @@ async function runGoogleShoppingFlow(
     );
   }
 
-  const lines = matches.map((m, i) => {
-    const price = m.priceKnown === false ? 'check price' : `from ₹${m.lowestPrice.toLocaleString('en-IN')}`;
-    const stores = m.merchants.length > 1 ? ` across ${m.merchants.length} stores` : ` at ${m.merchants[0]?.sellerName}`;
-    return `${i + 1}. **${m.title}**: ${price}${stores}${m.whyPicked ? `. ${m.whyPicked}` : ''}`;
-  });
+  // Short heading only: the cards show the details, and the bubble renders the "Picked for you" chips,
+  // the assumption note and the follow-up question from the result fields.
   const seen = parsedIntent.imageDescription ? `In your image I can see: ${parsedIntent.imageDescription}\n\n` : '';
-  const forYou = [
-    ...parsedIntent.activePreferences,
-    ...(parsedIntent.brandGroupLabel &&
-    !parsedIntent.activePreferences.some(p => p.toLowerCase().includes(parsedIntent.brandGroupLabel!.toLowerCase()))
-      ? [`Brands: ${parsedIntent.brandGroupLabel}`]
-      : []),
-  ];
-  const personalLine = forYou.length ? `Picked for you: ${forYou.join(' · ')}\n` : '';
-  const assumptionLine = parsedIntent.assumptions ? `${parsedIntent.assumptions}\n` : '';
-  const summary = `${seen}Here are the top ${matches.length} **${parsedIntent.cleanTarget}**${budgetStr}:\n${personalLine}${assumptionLine}\n${lines.join('\n')}\n\nOpen **Compare stores** on any product to see every store's price and offers.`;
+  // Drop budget words from the target so the heading doesn't say "under 3000 under ₹3,000"
+  const target = parsedIntent.cleanTarget.replace(/\s*(under|below|within|less than|upto|up to)\s*(rs\.?|inr|₹)?\s*[\d,.]+\s*(k|rs|inr|rupees)?\b/gi, '').trim() || parsedIntent.cleanTarget;
+  const summary = `${seen}Top ${matches.length} **${target}**${budgetStr}`;
 
   return {
     result: resultBase([makeEntity(entityId, parsedIntent.cleanTarget, parsedIntent.shoppingQuery)], { [entityId]: matches }, [parsedIntent.shoppingQuery]),

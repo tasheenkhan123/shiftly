@@ -117,6 +117,10 @@ export interface ProductMatch {
   dataSource?: string;
   /** Short reasons this product suits the user, e.g. "Oily skin: has salicylic acid" */
   fitsYou?: string[];
+  /** Key facts from product knowledge: scent notes, key ingredients, key specs */
+  highlights?: string[];
+  /** The #1 recommendation */
+  isTopPick?: boolean;
   /** When the cheapest store isn't a well-known one: the best price at a trusted store */
   trustedOffer?: { store: string; price: number };
 }
@@ -167,6 +171,10 @@ export interface SiftlyAnalysisResult {
   /** Preferences that shaped this search, human readable */
   activePreferences?: string[];
   assumptions?: string;
+  /** One question that would help narrow the picks next time */
+  followUpQuestion?: string;
+  /** Tappable question for a key preference we don't know yet (e.g. skin type) */
+  askPreference?: { categoryId: string; key: string; question: string; options: string[] };
 }
 
 export interface ExternalWebResult {
@@ -219,6 +227,8 @@ export interface UserProfile {
   country?: string;
   state?: string;
   avatarUrl?: string;
+  /** "Women's" | "Men's" | "Both", chosen at sign-up */
+  shopsFor?: string;
   isLoggedIn: boolean;
 }
 

@@ -21,6 +21,14 @@ interface ChatMessageBubbleProps {
   onOpenPriceComparison: (product: ProductMatch) => void;
   onToggleSave?: (product: ProductMatch) => void;
   savedProductIds?: Set<string>;
+  /** Opens the preferences panel on a category (from the "Picked for you" chips) */
+  onEditPreferences?: (categoryId?: string) => void;
+  /** Quick preference question under results */
+  isQuestionHidden?: (categoryId: string, key: string) => boolean;
+  isPreferenceKnown?: (categoryId: string, key: string) => boolean;
+  onAnswerPreference?: (categoryId: string, key: string, value: string) => void;
+  onDismissQuestion?: (categoryId: string, key: string) => void;
+  onRedoSearch?: () => void;
 }
 
 export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
@@ -28,9 +36,16 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
   currency,
   onOpenPriceComparison,
   onToggleSave,
-  savedProductIds = new Set()
+  savedProductIds = new Set(),
+  onEditPreferences,
+  isQuestionHidden,
+  isPreferenceKnown,
+  onAnswerPreference,
+  onDismissQuestion,
+  onRedoSearch
 }) => {
   const isUser = message.sender === 'user';
+  const [answered, setAnswered] = React.useState<string | null>(null);
 
   // 1. User Message (iOS / WhatsApp Blue Style)
   if (isUser) {
@@ -117,6 +132,29 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
             <RichText text={message.text} className="text-sm sm:text-base text-slate-800 leading-relaxed space-y-1" />
           )}
 
+          {/* Why these picks: tap a chip to change that preference */}
+          {(message.analysisResult?.activePreferences?.length || 0) > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 -mt-2">
+              <span className="text-[11px] font-semibold text-violet-700 flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> Picked for you:
+              </span>
+              {message.analysisResult!.activePreferences!.map((tag, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onEditPreferences?.(message.analysisResult?.categoryId)}
+                  className="px-2 py-0.5 rounded-full bg-violet-50 border border-violet-200 text-[11px] text-violet-800 hover:bg-violet-100"
+                  title="Change this preference"
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
+          {message.analysisResult?.assumptions && (
+            <p className="text-[11px] text-slate-500 -mt-2">{message.analysisResult.assumptions}</p>
+          )}
+
           {/* Grounding Web Sources / Citations */}
           {groundingSources.length > 0 && (
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
@@ -149,17 +187,6 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
           {/* If Shopping Intent: Render Matching Products */}
           {message.analysisResult && Object.values(message.analysisResult.productMatches || {}).flat().length > 0 && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    Top Product Recommendations & Live Store Comparison
-                  </h3>
-                </div>
-                <span className="text-xs text-slate-500">
-                  {Object.values(message.analysisResult.productMatches).flat().length} item(s) found
-                </span>
-              </div>
 
               {/* Product Grid: Group by component category for complete setups/bundles, or flat grid for single targets */}
               {message.analysisResult.detectedEntities && message.analysisResult.detectedEntities.length > 1 ? (
@@ -212,6 +239,66 @@ export const ChatMessageBubble: React.FC<ChatMessageBubbleProps> = ({
               )}
             </div>
           )}
+
+          {message.analysisResult?.followUpQuestion && (
+            <p className="text-sm text-slate-700 pt-1">{message.analysisResult.followUpQuestion}</p>
+          )}
+
+          {(() => {
+            const ask = message.analysisResult?.askPreference;
+            if (!ask || !onAnswerPreference) return null;
+            if (!answered && (isQuestionHidden?.(ask.categoryId, ask.key) || isPreferenceKnown?.(ask.categoryId, ask.key))) return null;
+            return (
+              <div className="p-3 rounded-2xl bg-violet-50/60 border border-violet-200 space-y-2">
+                {answered ? (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-violet-900">
+                    <span>
+                      Got it: <strong>{answered}</strong>. I&apos;ll use this for your next searches.
+                    </span>
+                    {onRedoSearch && (
+                      <button
+                        type="button"
+                        onClick={onRedoSearch}
+                        className="px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-semibold"
+                      >
+                        Redo this search with it
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-violet-900 flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5" /> Quick question so I can personalise: {ask.question}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onDismissQuestion?.(ask.categoryId, ask.key)}
+                        className="text-[11px] text-slate-500 hover:text-slate-800"
+                      >
+                        Skip
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ask.options.map(opt => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => {
+                            setAnswered(opt);
+                            onAnswerPreference(ask.categoryId, ask.key, opt);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-white border border-violet-200 text-xs text-violet-900 hover:bg-violet-100"
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

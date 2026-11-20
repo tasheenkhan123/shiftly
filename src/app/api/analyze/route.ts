@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
           constraints,
           history,
           (stage, message) => send({ type: 'progress', stage, message }),
-          { profile, categoryHint }
+          { profile: body?.forSomeoneElse === true ? {} : profile, categoryHint, forSomeoneElse: body?.forSomeoneElse === true }
         );
         // Don't echo the (large) image back; the page already has it
         const { mediaPreviewUrl: _omit, ...result } = search.result;

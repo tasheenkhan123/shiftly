@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ImagePlus, Loader2, X } from 'lucide-react';
+import { ArrowUp, Gift, ImagePlus, Loader2, X } from 'lucide-react';
 import { downscaleImage } from '@/lib/image';
 
 interface ChatInputProps {
@@ -10,11 +10,14 @@ interface ChatInputProps {
   isLoading: boolean;
   /** Overrides the default hint text (e.g. a category example) */
   placeholder?: string;
+  /** "Shopping for someone else": the search won't use the user's own preferences */
+  forSomeoneElse?: boolean;
+  onToggleForSomeoneElse?: () => void;
 }
 
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading, placeholder }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading, placeholder, forSomeoneElse = false, onToggleForSomeoneElse }) => {
   const [text, setText] = useState('');
   const [image, setImage] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -162,6 +165,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading, placeho
         </div>
       </form>
 
+      {onToggleForSomeoneElse && (
+        <div className="mt-2 flex justify-center">
+          <button
+            type="button"
+            onClick={onToggleForSomeoneElse}
+            aria-pressed={forSomeoneElse}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border flex items-center gap-1 transition-colors ${
+              forSomeoneElse ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+            title="Your own preferences (skin type, sizes) won't be used for this search"
+          >
+            <Gift className="w-3 h-3" />
+            {forSomeoneElse ? 'Shopping for someone else: your preferences are off' : 'Shopping for someone else?'}
+          </button>
+        </div>
+      )}
       <p className="mt-2 text-center text-[11px] text-slate-400">
         {error ? <span className="text-red-600">{error}</span> : 'Paste or drop a screenshot to find that exact product. Prices come from Google Shopping and can change.'}
       </p>
